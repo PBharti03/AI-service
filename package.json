@@ -1,0 +1,42 @@
+{
+  "name": "@b2y/ai-service",
+  "version": "0.1.0",
+  "description": "Reusable, task-oriented AI orchestration for B2Y applications: trusted context, schema-validated structured output, self-hosted OpenAI-compatible providers.",
+  "private": true,
+  "license": "UNLICENSED",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "scripts": {
+    "clean": "node -e \"for (const d of ['dist','build']) require('node:fs').rmSync(d, { recursive: true, force: true })\"",
+    "build": "npm run clean && tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "test": "npm run clean && tsc -p tsconfig.test.json && cd build && node --test",
+    "verify": "npm run typecheck && npm run lint && npm test && npm run build",
+    "demo:groq": "npm run clean && tsc -p tsconfig.test.json && node build/examples/LeadSummaryDemo.js",
+    "demo:groq:env": "npm run clean && tsc -p tsconfig.test.json && node --env-file=.env build/examples/LeadSummaryDemo.js"
+  },
+  "dependencies": {
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "20.19.43",
+    "eslint": "10.14.0",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.1"
+  }
+}
