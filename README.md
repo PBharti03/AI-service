@@ -1,55 +1,98 @@
 # @b2y/ai-service
 
-Reusable, task-oriented AI orchestration for B2Y applications.
+Reusable, task-oriented AI orchestration for B2Y applications, in plain JavaScript (ES modules, no build
+step; types are documented with JSDoc).
 
-The package runs **registered tasks** (for example "summarise a lead") against **one self-hosted,
-OpenAI-compatible model server** (Ollama for local development, vLLM for production), and returns
-**schema-validated JSON** or a typed error. It has no database access, no tools, no agent loop and no
-automatic fallback to another provider.
+The package runs **registered tasks** against **one OpenAI-compatible model server** (Groq, or a
+self-hosted Ollama/vLLM) and returns **schema-validated JSON** or a typed error. On top of that it offers:
 
-Status: Step 1 (foundation). Private package, not published.
+- **Application profiles and chat**: the assistant always speaks as the application that uses the package
+  (its own greeting, capabilities and polite answers for topics it does not cover).
+- **Text-to-SQL**: the model writes one read-only SELECT, which is parsed with PostgreSQL's own grammar,
+  checked against an allow-list policy and parameterised. The application runs it with its own read-only
+  database role.
+- **Document question answering**: each application adds its own policies, privacy notice, FAQ or
+  questionnaires (PDF or text); answers come only from that application's documents, with sources.
+
+It has no database connection, no tools, no agent loop and no automatic fallback to another provider.
+
+Private package, not published.
 
 ## Responsibilities
 
-| The application backend owns | This package owns |
+| The application owns | This package owns |
 |---|---|
 | Authentication, tenant resolution, RBAC, resource ownership | Validating the `TrustedContext` it is given |
-| Fetching data through its own authorized services | Minimizing and framing that data as untrusted input |
-| Quotas and concurrency (Redis/BullMQ) | Usage metadata for metering (`onUsage`) |
-| Persisting results, audit, UI | Schema-validated output or a typed error |
+| Its application profile and its documents folder | Speaking only as that profile; reading only that application's documents |
+| Database connections and a read-only role | Generating and validating SQL; it never executes SQL |
+| Quotas, persistence, audit, UI | Usage metadata for metering (`onUsage`), schema-validated output or a typed error |
 
 The package never authenticates anyone, never grants permissions and never reads identity from prompts,
 task input or model output.
 
-## Usage (CommonJS)
+## Usage
+
+Works with `import` and, on Node.js 20.19+, with `require` (`require(esm)`).
 
 ```js
-const { z } = require("zod");
-const { createAiService, createTaskRegistry, createOllamaProvider, defineTask } = require("@b2y/ai-service");
+const {
+  createAiService, createOpenAICompatibleProvider, createTaskRegistry,
+  defineApplicationProfile, createChatAssistant, ASSISTANT_CHAT_TASK, ASSISTANT_CHAT_TASK_ID,
+  createFolderDocumentStore, createDocumentQaAgent, DOCUMENT_ANSWER_TASK, DOCUMENT_ANSWER_TASK_ID,
+} = require("@b2y/ai-service");
 
-const summary = defineTask({
-  id: "example.summary",
-  version: 1,
-  promptVersion: "v1",
-  description: "Summarise a note",
-  instructions: "Summarise the note in one sentence.",
-  dataLabel: "note",
-  inputSchema: z.strictObject({ note: z.string().max(4000) }),
-  outputSchema: z.strictObject({ summary: z.string().max(300) }),
-  generation: { temperature: 0, maxTokens: 200 },
-  maxClassification: "SYNTHETIC",
+const profile = defineApplicationProfile({
+  id: "ecommerce", // must equal the trusted context's applicationId
+  name: "B2Y Shop",
+  description: "An online shop selling home goods.",
+  capabilities: ["order help", "return, refund and shipping policy questions"],
+  outOfScope: ["lead statistics"],
 });
 
 const ai = createAiService({
-  provider: createOllamaProvider({ baseUrl: "http://localhost:11434/v1", model: "<pinned model tag>" }),
-  registry: createTaskRegistry([summary]),
-  logger, // optional; b2y-logger compatible; receives metadata only
-  onUsage: async (record) => { /* write metering row */ },
+  provider: createOpenAICompatibleProvider({
+    id: "groq", kind: "PAID", baseUrl: "https://api.groq.com/openai/v1", model: "openai/gpt-oss-20b",
+    apiKey: process.env.GROQ_API_KEY, timeoutMs: 60_000, allowedClassifications: ["SYNTHETIC", "INTERNAL"],
+    structuredOutput: "json_schema",
+  }),
+  registry: createTaskRegistry([ASSISTANT_CHAT_TASK, DOCUMENT_ANSWER_TASK]),
+  allowPaidProvider: true,
 });
 
-// context comes from the app's authenticated request or job, never from the client or the model
-const result = await ai.runTask(summary, context, { note: "..." }, { signal });
+const chat = createChatAssistant({ ai, profile });
+const documents = createDocumentQaAgent({ ai, profile, store: createFolderDocumentStore({ root: "/var/lib/shop/ai-documents" }) });
+
+// context comes from the app's authenticated request, never from the client or the model
+const context = { applicationId: "ecommerce", tenantId: "t1", actor: { type: "USER", userId: "u1" }, requestId: "r1",
+  permittedTasks: [ASSISTANT_CHAT_TASK_ID, DOCUMENT_ANSWER_TASK_ID], dataClassification: "INTERNAL" };
+
+const found = await documents.answer({ question: "What is the return policy?", context });
+if (found.status !== "ANSWERED") {
+  const result = await chat.reply({ question: "What is the return policy?", context, documentsAvailable: found.status !== "NO_DOCUMENTS" });
+}
 ```
+
+### Documents
+
+- Add documents with `store.addDocument(applicationId, { title, type, text, fileName })`. Types: `policy`,
+  `privacy`, `terms`, `faq`, `questionnaire`, `guide`, `other`. Extract PDF text with
+  `extractPdfText(bytes)` from `@b2y/ai-service/documents/pdf` (optional peer dependency `unpdf`, Node.js 22+;
+  scanned PDFs without a text layer need OCR first).
+- The folder store keeps `<root>/<applicationId>/documents/*.json` and `index.json` (folders 0700, files 0600).
+  Any object with the same methods (`addDocument`, `removeDocument`, `listDocuments`, `loadIndex`) can replace it.
+- Search is local keyword search (BM25); nothing is embedded or sent anywhere. Only the best matching
+  passages (at most 8, 1,500 characters each) go to the model, which must cite them. `NO_DOCUMENTS` and
+  unmatched questions return without a model call.
+- Isolation: the agent reads only `profile.id`'s documents and refuses a request whose trusted
+  `applicationId` is different.
+
+### Text-to-SQL
+
+`defineSqlPolicy({ dialect, schema, policy })` describes the tables and columns the model may see and use;
+`createPostgresSqlValidator(policy)` (from `@b2y/ai-service/text-to-sql/postgres`, optional peer dependency
+`libpg-query`) checks one statement; `createTextToSqlAgent({ ai, validator })` generates, validates and
+retries once. The result is a `ValidatedQuery` (parameterised SQL, row limit applied) for the application's
+own read-only executor; check what it returns with `checkQueryResult`.
 
 ## Security controls
 
@@ -100,66 +143,12 @@ const result = await ai.runTask(summary, context, { note: "..." }, { signal });
 differs between Ollama and vLLM versions, so confirm it with the integration tests for the exact
 pinned server version. Zod validation always runs, whatever the mode.
 
-## Groq demonstration (synthetic data only)
-
-`examples/LeadSummaryDemo.ts` runs one `lead.summary` task on one synthetic lead with exactly one
-request to Groq, using only the public API and the existing OpenAI-compatible adapter (no Groq SDK).
-
-| Setting | Value |
-|---|---|
-| Provider kind | `PAID`, opted in with `allowPaidProvider: true` |
-| Base URL | `https://api.groq.com/openai/v1` (HTTPS, exact host `api.groq.com`) |
-| Model | `openai/gpt-oss-20b` |
-| API key | `GROQ_API_KEY` environment variable (never hard-coded or printed) |
-| Classification | `SYNTHETIC` only (provider and task) |
-| Generation | temperature `0.2`, max output tokens `1024` |
-| Timeout / retries | 60 s / 0 |
-| Output | `json_schema` with `strict: true`, then strict Zod validation |
-
-Required environment variable: `GROQ_API_KEY`.
-
-Run with the key exported in your shell:
-
-```bash
-export GROQ_API_KEY="<your key>"
-npm run demo:groq
-```
-
-Or keep the key in a local, git-ignored `.env` file (copy `.env.example`):
-
-```bash
-cp .env.example .env
-npm run demo:groq:env
-```
-
-The demo prints the HTTP status, the model and finish reason reported by Groq, whether Zod validation
-passed, token counts, latency and the validated JSON. On failure it prints the package error code and
-Groq's error type and code, never Groq's error message, the request headers or the key.
-
-Restrictions:
-- Synthetic data only. Groq is an external hosted service. Real customer or company data must not
-  be sent until Groq's data-retention and training terms pass the privacy approval required by the
-  architecture; until then the provider stays `SYNTHETIC`-only.
-- The paid-provider opt-in is manual and per service. There is no automatic fallback to or from Groq.
-
-Known limitations:
-- `openai/gpt-oss-20b` is a reasoning model, and its reasoning counts toward the 1024-token limit.
-  If the response is cut off (`finish_reason: "length"`), the task fails closed with
-  `OUTPUT_PARSE_FAILED`; it does not return partial output.
-- `strict: true` structured output depends on Groq's support for the model; Zod validation always
-  runs afterwards.
-- Model output is not deterministic. Runs can differ, and only output that passes the schema is
-  returned.
-- The response's `model` must equal the configured model exactly, or the call fails closed.
-
 ## Scripts
 
 | Command | Purpose |
 |---|---|
-| `npm run typecheck` | Strict TypeScript check of `src` and `tests` |
-| `npm run lint` | ESLint with typescript-eslint strict, type-aware rules |
-| `npm test` | Compiles to `build/` and runs `node:test` (unit and security; no network) |
-| `npm run build` | Emits CommonJS and `.d.ts` files to `dist/` |
-| `npm run verify` | All of the above |
+| `npm run lint` | ESLint (JavaScript recommended rules) |
+| `npm test` | `node:test` unit and security tests (no network) |
+| `npm run verify` | Lint and tests |
 
-Requires Node.js >= 20.19.
+Requires Node.js >= 20.19 (PDF extraction: Node.js 22+).

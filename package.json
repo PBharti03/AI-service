@@ -1,42 +1,47 @@
 {
   "name": "@b2y/ai-service",
   "version": "0.1.0",
-  "description": "Reusable, task-oriented AI orchestration for B2Y applications: trusted context, schema-validated structured output, self-hosted OpenAI-compatible providers.",
+  "description": "Reusable, task-oriented AI orchestration for B2Y applications: trusted context, schema-validated structured output, text-to-SQL and document question answering.",
   "private": true,
   "license": "UNLICENSED",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "type": "module",
+  "main": "./src/index.js",
   "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
-    },
+    ".": "./src/index.js",
+    "./text-to-sql/postgres": "./src/text-to-sql/postgres/index.js",
+    "./documents/pdf": "./src/documents/PdfText.js",
     "./package.json": "./package.json"
   },
   "files": [
-    "dist"
+    "src"
   ],
   "engines": {
     "node": ">=20.19.0"
   },
   "scripts": {
-    "clean": "node -e \"for (const d of ['dist','build']) require('node:fs').rmSync(d, { recursive: true, force: true })\"",
-    "build": "npm run clean && tsc -p tsconfig.build.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
-    "test": "npm run clean && tsc -p tsconfig.test.json && cd build && node --test",
-    "verify": "npm run typecheck && npm run lint && npm test && npm run build",
-    "demo:groq": "npm run clean && tsc -p tsconfig.test.json && node build/examples/LeadSummaryDemo.js",
-    "demo:groq:env": "npm run clean && tsc -p tsconfig.test.json && node --env-file=.env build/examples/LeadSummaryDemo.js"
+    "test": "node --test \"tests/**/*.test.js\"",
+    "verify": "npm run lint && npm test"
   },
   "dependencies": {
     "zod": "4.6.7"
   },
+  "peerDependencies": {
+    "libpg-query": "^17.8.2",
+    "unpdf": "^1.9.1"
+  },
+  "peerDependenciesMeta": {
+    "libpg-query": {
+      "optional": true
+    },
+    "unpdf": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@eslint/js": "10.0.1",
-    "@types/node": "20.19.43",
     "eslint": "10.14.0",
-    "typescript": "6.0.3",
-    "typescript-eslint": "8.72.1"
+    "libpg-query": "17.8.2",
+    "unpdf": "1.9.1"
   }
 }
