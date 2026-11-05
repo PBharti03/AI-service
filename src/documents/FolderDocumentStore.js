@@ -2,10 +2,10 @@ import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { z } from "zod";
-import { AiServiceError } from "../errors/AiServiceError.js";
-import { ErrorCodes } from "../errors/ErrorCodes.js";
-import { summarizeZodError } from "../validation/ZodIssues.js";
-import { buildSearchIndex } from "./DocumentSearch.js";
+import { AiServiceError } from "../core/Errors.js";
+import { ErrorCodes } from "../core/Errors.js";
+import { summarizeZodError } from "../core/Errors.js";
+import { buildSearchIndex } from "./Documents.js";
 
 /**
  * Neutral kinds of document used when the consumer does not pass documentTypes. A consumer normally
@@ -32,7 +32,7 @@ function documentSchemaFor(documentTypes) {
  * @property {(applicationId: string, document: { title: string, type: string, text: string, fileName?: string }) => Promise<{ id: string, passages: number }>} addDocument
  * @property {(applicationId: string, documentId: string) => Promise<boolean>} removeDocument
  * @property {(applicationId: string) => Promise<{ id: string, title: string, type: string, fileName?: string, addedAt?: string, passages: number }[]>} listDocuments
- * @property {(applicationId: string) => Promise<import("./DocumentSearch.js").SearchIndex | null>} loadIndex
+ * @property {(applicationId: string) => Promise<import("./Documents.js").SearchIndex | null>} loadIndex
  * @property {readonly string[]} documentTypes - The kinds of document addDocument accepts.
  */
 

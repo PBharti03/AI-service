@@ -1,16 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { parseTrustedContext } from "../context/TrustedContext.js";
-import { AiServiceError } from "../errors/AiServiceError.js";
-import { ErrorCodes } from "../errors/ErrorCodes.js";
-import { responseBlocksSchema } from "../copilot/ResponseBlocks.js";
+import { parseTrustedContext } from "../core/Context.js";
+import { AiServiceError } from "../core/Errors.js";
+import { ErrorCodes } from "../core/Errors.js";
+import { responseBlocksSchema } from "../copilot/Capabilities.js";
 
 /**
- * Conversation history for the assistant, scoped to one application, tenant and user. The scope always
- * comes from the trusted context, never from the client: a conversation id from another user or tenant
- * simply finds nothing. Assistant messages built from application data are stored for the user but are
- * never shown to the model again (modelVisible false). No credentials, tokens or context grants are
- * stored: only the scope ids, the message text and blocks, and a little metadata.
+ * Conversation history scoped by the trusted context (application, tenant, user). Data-based answers are
+ * never shown to the model again; no credentials, tokens or grants are stored.
  */
 
 export const DEFAULT_RETENTION_DAYS = 14;
@@ -31,8 +28,7 @@ export const conversationMessageSchema = z.strictObject({
   route: z.string().max(64).nullable().default(null),
   status: z.string().max(32).nullable().default(null),
   modelVisible: z.boolean(),
-  // The application's own display data for this message (for example its reply object), JSON only and at
-  // most APP_DATA_MAX_BYTES. Kept for the application's server; never shown to the model.
+  // The application's own display data (JSON, at most APP_DATA_MAX_BYTES); never shown to the model.
   appData: z.json().optional(),
   createdAt: z.iso.datetime(),
 });
@@ -113,6 +109,7 @@ export function blocksToText(blocks) {
       if (block.type === "bullets") return block.items.map((item) => `- ${item}`).join("\n");
       if (block.type === "metrics") return block.items.map((item) => `${item.label}: ${item.value}`).join("; ");
       if (block.type === "notice") return block.items.join(" ");
+      if (block.type === "flow") return [block.title, ...block.nodes.map((node, index) => `${index + 1}. ${node.label}`)].filter(Boolean).join("\n");
       return "";
     })
     .filter((part) => part !== "")
@@ -151,7 +148,6 @@ export function createConversationHistory({ store, retentionDays = DEFAULT_RETEN
       if (!parsed.success || !sameScope(parsed.data, scope) || parsed.data.conversationId !== conversationId) continue;
       messages.push(parsed.data);
     }
-    // A conversation whose last activity is older than the retention period is treated as gone.
     if (messages.length > 0 && messages[messages.length - 1].createdAt < oldest) return [];
     return messages;
   }
@@ -191,11 +187,7 @@ export function createConversationHistory({ store, retentionDays = DEFAULT_RETEN
   });
 }
 
-/**
- * Optional helper for applications without a scheduler: runs cleanup now and then every intervalMs, on
- * an unref'd timer (it never keeps the process alive). Returns { stop }. Applications with cron should
- * call history.cleanupExpiredConversations() from their own job instead.
- */
+/** Runs cleanup now and every intervalMs on an unref'd timer; returns { stop }. */
 export function scheduleConversationCleanup({ history, intervalMs = 6 * 3_600_000, onResult, onError } = {}) {
   if (typeof history?.cleanupExpiredConversations !== "function") throw new AiServiceError(ErrorCodes.CONFIG_INVALID, "scheduleConversationCleanup needs a conversation history");
   if (!Number.isInteger(intervalMs) || intervalMs < 60_000) throw new AiServiceError(ErrorCodes.CONFIG_INVALID, "intervalMs must be at least one minute");

@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { join, resolve } from "node:path";
-import { AiServiceError } from "../errors/AiServiceError.js";
-import { ErrorCodes } from "../errors/ErrorCodes.js";
+import { AiServiceError } from "../core/Errors.js";
+import { ErrorCodes } from "../core/Errors.js";
 import { defineConversationStore } from "./ConversationHistory.js";
 
 /**

@@ -1,12 +1,6 @@
 import { createElement as h, useCallback, useEffect, useRef, useState } from "react";
 
-/**
- * Reusable chat UI for createAiAssistant replies (React 18+, no other dependency, no build step).
- * The application supplies placement, theme (CSS variables, see styles.css) and its authenticated API
- * calls (`send`, and optionally `loadConversation` and `listConversations`); this component handles the
- * conversation, restoring the user's chat from the server, the typing indicator, errors with retry, and
- * rendering of reply blocks. All text is rendered as escaped React text.
- */
+/** Reusable chat UI for createAiAssistant replies (React 18+); all text is rendered escaped. */
 
 const DEFAULT_LABELS = {
   title: "AI Assistant",
@@ -90,6 +84,29 @@ function Chart({ spec }) {
   );
 }
 
+/** A flowchart as ordered steps; decisions list their branches. */
+function Flow({ block }) {
+  const labelOf = new Map(block.nodes.map((node) => [node.id, node.label]));
+  return h(
+    "figure",
+    { className: "b2y-ai-card b2y-ai-flow" },
+    block.title ? h("figcaption", { className: "b2y-ai-card-title" }, block.title) : null,
+    h(
+      "ol",
+      null,
+      ...block.nodes.map((node) => {
+        const branches = block.edges.filter((edge) => edge.from === node.id && (node.kind === "decision" || edge.label));
+        return h(
+          "li",
+          { key: node.id, className: `b2y-ai-flow-${node.kind}` },
+          h("span", null, node.label),
+          branches.length > 0 ? h("ul", null, ...branches.map((edge, index) => h("li", { key: index }, `${edge.label || "Next"} → ${labelOf.get(edge.to) ?? ""}`))) : null,
+        );
+      }),
+    ),
+  );
+}
+
 function Block({ block, labels }) {
   switch (block.type) {
     case "heading":
@@ -115,6 +132,8 @@ function Block({ block, labels }) {
       return h(Chart, { spec: block.spec });
     case "notice":
       return h("div", { className: `b2y-ai-notice b2y-ai-notice-${block.tone}` }, block.title ? h("strong", null, block.title) : null, h("ul", null, ...block.items.map((item, index) => h("li", { key: index }, item))));
+    case "flow":
+      return h(Flow, { block });
     case "sources":
       return h("div", { className: "b2y-ai-sources" }, h("span", null, `${labels.sources}:`), ...block.items.map((item, index) => (item.url ? h("a", { key: index, href: item.url, target: "_blank", rel: "noopener noreferrer" }, item.title) : h("span", { key: index }, item.title))));
     default:
@@ -129,9 +148,7 @@ export function AssistantMessage({ blocks = [], labels: labelOverrides = {} }) {
 }
 
 /**
- * Decides which conversation the chat opens with, from the server only: the given id; none when the id is
- * null (a new chat); otherwise the user's most recent conversation. A conversation the server returns no
- * messages for (expired, deleted or not the user's) starts a new chat. Never throws.
+ * The conversation to open: the given id, none for null, otherwise the latest; empty starts fresh.
  * @returns {Promise<{ conversationId: string | undefined, messages: { role: string, text: string, blocks: object[] }[], recent: object[] | null }>}
  */
 export async function restoreConversation({ conversationId, loadConversation, listConversations }) {
@@ -154,11 +171,7 @@ export async function restoreConversation({ conversationId, loadConversation, li
 }
 
 /**
- * Restoring: with `conversationId` the component opens that conversation; with `conversationId` null it
- * starts a new chat; when it is undefined and `listConversations` is given, it reopens the user's most
- * recent conversation from the server (so a refresh, a new tab or a new sign-in continues the chat).
- * The server decides which conversations belong to the user: the component only shows what it returns.
- *
+ * conversationId: an id opens it, null starts a new chat, undefined reopens the latest (listConversations).
  * @param {{
  *   send: (request: { message: string, conversationId?: string }) => Promise<{ conversationId: string, blocks: object[] }>,
  *   loadConversation?: (conversationId: string) => Promise<{ role: string, text: string, blocks?: object[] }[]>,
@@ -182,10 +195,12 @@ export function AssistantChat({ send, loadConversation, listConversations, conve
   const scrollRef = useRef(null);
   const inputRef = useRef(null);
   const loadToken = useRef(0);
+  // Synchronous guard against double submits.
+  const inFlight = useRef(false);
   const callbacks = useRef({ loadConversation, listConversations, onConversationChange });
   callbacks.current = { loadConversation, listConversations, onConversationChange };
 
-  /** Opens one conversation from the server; an empty result (expired or not the user's) starts fresh. */
+  /** Opens a conversation; an empty result starts fresh. */
   const open = useCallback(async (id, { notify = true } = {}) => {
     const token = ++loadToken.current;
     const { loadConversation: load, onConversationChange: changed } = callbacks.current;
@@ -230,7 +245,8 @@ export function AssistantChat({ send, loadConversation, listConversations, conve
   const ask = useCallback(
     async (text, { retry = false } = {}) => {
       const message = String(text ?? "").trim();
-      if (!message || message.length > maxLength || sending || restoring) return;
+      if (!message || message.length > maxLength || sending || restoring || inFlight.current) return;
+      inFlight.current = true;
       setError(null);
       setSending(true);
       setHistoryOpen(false);
@@ -249,6 +265,7 @@ export function AssistantChat({ send, loadConversation, listConversations, conve
       } catch (failure) {
         setError({ message: (failure && typeof failure.userMessage === "string" && failure.userMessage) || labels.error, retryText: message });
       } finally {
+        inFlight.current = false;
         setSending(false);
         inputRef.current?.focus?.();
       }

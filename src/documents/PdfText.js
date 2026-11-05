@@ -1,8 +1,8 @@
 // PDF text extraction. Separate entry point ("@b2y/ai-service/documents/pdf") so the optional unpdf peer
 // dependency is only loaded by applications that add PDF documents. Needs Node.js 22 or later.
 import { extractText, getDocumentProxy } from "unpdf";
-import { AiServiceError } from "../errors/AiServiceError.js";
-import { ErrorCodes } from "../errors/ErrorCodes.js";
+import { AiServiceError } from "../core/Errors.js";
+import { ErrorCodes } from "../core/Errors.js";
 
 export const MAX_PDF_BYTES = 20 * 1024 * 1024;
 export const MAX_PDF_PAGES = 300;

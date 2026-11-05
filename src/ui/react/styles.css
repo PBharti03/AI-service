@@ -1,9 +1,4 @@
-/* @b2y/ai-service chat UI. Theme with CSS variables on .b2y-ai-chat or any parent:
-   --b2y-ai-accent, --b2y-ai-text, --b2y-ai-muted, --b2y-ai-border, --b2y-ai-surface, --b2y-ai-background,
-   --b2y-ai-font, --b2y-ai-height (default: fills up to 80% of the viewport).
-   .b2y-ai-theme gives an application's own chat layout the same theme, to use the classes below
-   (b2y-ai-row, b2y-ai-avatar, b2y-ai-bubble, b2y-ai-bubble-user, b2y-ai-typing, b2y-ai-error, b2y-ai-empty,
-   b2y-ai-suggestions, b2y-ai-input, b2y-ai-send, b2y-ai-hint ...) with its own components. */
+/* @b2y/ai-service chat UI. Theme with --b2y-ai-* variables; .b2y-ai-theme applies it to an app's own layout. */
 .b2y-ai-chat, .b2y-ai-theme {
   --_accent: var(--b2y-ai-accent, #4f46e5);
   --_accent-soft: color-mix(in srgb, var(--_accent) 10%, transparent);
@@ -88,6 +83,12 @@
 .b2y-ai-tick { font-size: 10px; fill: var(--_muted); }
 .b2y-ai-legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; color: var(--_muted); padding: 0 12px 10px; }
 .b2y-ai-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: middle; }
+.b2y-ai-flow ol { margin: 0; padding: 10px 12px 12px 34px; display: flex; flex-direction: column; gap: 6px; }
+.b2y-ai-flow ol > li { padding: 6px 10px; border: 1px solid var(--_border); border-radius: 10px; background: var(--_surface); }
+.b2y-ai-flow ol > li::marker { color: var(--_accent); font-weight: 600; }
+.b2y-ai-flow .b2y-ai-flow-start, .b2y-ai-flow .b2y-ai-flow-end { background: var(--_accent-soft); font-weight: 500; }
+.b2y-ai-flow .b2y-ai-flow-decision { border-style: dashed; }
+.b2y-ai-flow ul { margin: 4px 0 0; padding-left: 16px; font-size: 12px; color: var(--_muted); }
 .b2y-ai-notice { border-radius: 12px; padding: 10px 12px; font-size: 13px; }
 .b2y-ai-notice ul { margin: 2px 0 0; padding-left: 18px; }
 .b2y-ai-notice-info { background: #eff6ff; color: #1e3a8a; border: 1px solid #bfdbfe; }
