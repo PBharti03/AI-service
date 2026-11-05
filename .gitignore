@@ -5,3 +5,6 @@ evaluation/reports/
 .env
 .env.*
 .DS_Store
+
+# npm pack output (consumers vendor their own copy)
+*.tgz

@@ -1,0 +1,141 @@
+/* @b2y/ai-service chat UI. Theme with CSS variables on .b2y-ai-chat or any parent:
+   --b2y-ai-accent, --b2y-ai-text, --b2y-ai-muted, --b2y-ai-border, --b2y-ai-surface, --b2y-ai-background,
+   --b2y-ai-font, --b2y-ai-height (default: fills up to 80% of the viewport).
+   .b2y-ai-theme gives an application's own chat layout the same theme, to use the classes below
+   (b2y-ai-row, b2y-ai-avatar, b2y-ai-bubble, b2y-ai-bubble-user, b2y-ai-typing, b2y-ai-error, b2y-ai-empty,
+   b2y-ai-suggestions, b2y-ai-input, b2y-ai-send, b2y-ai-hint ...) with its own components. */
+.b2y-ai-chat, .b2y-ai-theme {
+  --_accent: var(--b2y-ai-accent, #4f46e5);
+  --_accent-soft: color-mix(in srgb, var(--_accent) 10%, transparent);
+  --_text: var(--b2y-ai-text, #111827);
+  --_muted: var(--b2y-ai-muted, #6b7280);
+  --_border: var(--b2y-ai-border, #e5e7eb);
+  --_surface: var(--b2y-ai-surface, #f6f7f9);
+  --_bg: var(--b2y-ai-background, #ffffff);
+  --_radius: 14px;
+  font-family: var(--b2y-ai-font, inherit);
+  color: var(--_text);
+}
+.b2y-ai-chat {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: var(--b2y-ai-height, min(80vh, 860px));
+  min-height: 420px;
+  background: var(--_bg);
+  border: 1px solid var(--_border);
+  border-radius: 18px;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 8px 24px rgba(16, 24, 40, 0.05);
+  font-size: 14px;
+  line-height: 1.6;
+  overflow: hidden;
+}
+.b2y-ai-chat *, .b2y-ai-chat *::before, .b2y-ai-chat *::after, .b2y-ai-theme *, .b2y-ai-theme *::before, .b2y-ai-theme *::after { box-sizing: border-box; }
+.b2y-ai-chat button, .b2y-ai-theme button { font: inherit; }
+.b2y-ai-chat button:focus-visible, .b2y-ai-chat a:focus-visible, .b2y-ai-theme button:focus-visible { outline: 2px solid var(--_accent); outline-offset: 2px; }
+
+/* Header */
+.b2y-ai-header { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--_border); background: var(--_bg); }
+.b2y-ai-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.b2y-ai-title > div { display: flex; flex-direction: column; min-width: 0; }
+.b2y-ai-title strong { font-size: 15px; font-weight: 600; line-height: 1.3; }
+.b2y-ai-title span:not(.b2y-ai-avatar) { font-size: 12px; color: var(--_muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.b2y-ai-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.b2y-ai-ghost { display: inline-flex; align-items: center; gap: 6px; background: transparent; border: 1px solid var(--_border); border-radius: 10px; padding: 6px 10px; font-size: 13px; color: var(--_text); cursor: pointer; transition: background 0.15s, border-color 0.15s; }
+.b2y-ai-ghost:hover:not(:disabled) { background: var(--_surface); border-color: color-mix(in srgb, var(--_accent) 40%, var(--_border)); }
+.b2y-ai-ghost:disabled { opacity: 0.45; cursor: default; }
+.b2y-ai-history { position: absolute; z-index: 5; top: calc(100% + 6px); right: 16px; width: min(340px, calc(100% - 32px)); max-height: 340px; overflow-y: auto; background: var(--_bg); border: 1px solid var(--_border); border-radius: 12px; box-shadow: 0 12px 32px rgba(16, 24, 40, 0.14); padding: 6px; animation: b2y-ai-in 0.16s ease-out; }
+.b2y-ai-history-item { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%; text-align: left; background: transparent; border: 0; border-radius: 8px; padding: 8px 10px; cursor: pointer; color: var(--_text); }
+.b2y-ai-history-item span { font-size: 13px; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.b2y-ai-history-item time { font-size: 11px; color: var(--_muted); }
+.b2y-ai-history-item:hover, .b2y-ai-history-item.b2y-ai-active { background: var(--_accent-soft); }
+
+/* Avatar */
+.b2y-ai-avatar { flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 10px; color: #fff; background: linear-gradient(135deg, var(--_accent), color-mix(in srgb, var(--_accent) 60%, #7c3aed)); }
+
+/* Messages */
+.b2y-ai-messages { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 18px; padding: 20px 16px 12px; scroll-behavior: smooth; background: linear-gradient(var(--_bg), color-mix(in srgb, var(--_surface) 55%, var(--_bg))); }
+.b2y-ai-row { display: flex; gap: 10px; align-items: flex-start; animation: b2y-ai-in 0.22s ease-out; }
+.b2y-ai-row-user { justify-content: flex-end; }
+.b2y-ai-bubble-user { margin: 0; max-width: min(78%, 640px); background: var(--_accent); color: #fff; padding: 9px 14px; border-radius: 18px 18px 6px 18px; white-space: pre-wrap; overflow-wrap: anywhere; box-shadow: 0 1px 2px rgba(16, 24, 40, 0.08); }
+.b2y-ai-bubble { min-width: 0; max-width: min(88%, 760px); background: var(--_bg); border: 1px solid var(--_border); border-radius: 6px 18px 18px 18px; padding: 12px 16px; box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04); }
+.b2y-ai-answer { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.b2y-ai-paragraph { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.b2y-ai-heading { margin: 2px 0 -2px; font-size: 14.5px; font-weight: 600; }
+.b2y-ai-bullets { margin: 0; padding-left: 20px; }
+.b2y-ai-bullets li { padding-left: 2px; }
+.b2y-ai-bullets li + li { margin-top: 4px; }
+.b2y-ai-bullets li::marker { color: var(--_accent); }
+
+/* Cards: metrics, tables, charts */
+.b2y-ai-card { margin: 0; border: 1px solid var(--_border); border-radius: 12px; background: var(--_bg); overflow: hidden; }
+.b2y-ai-card-title { font-size: 12.5px; font-weight: 600; padding: 10px 12px 0; color: var(--_text); }
+.b2y-ai-metrics { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+.b2y-ai-metric { border: 1px solid var(--_border); border-radius: 12px; padding: 10px 12px; background: var(--_surface); display: flex; flex-direction: column; gap: 2px; }
+.b2y-ai-metric-value { font-size: 19px; font-weight: 650; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.b2y-ai-metric-label { font-size: 12px; color: var(--_muted); }
+.b2y-ai-table-wrap { overflow: auto; max-height: 360px; }
+.b2y-ai-table { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 13px; }
+.b2y-ai-table th { position: sticky; top: 0; text-align: left; font-weight: 600; font-size: 12px; color: var(--_muted); background: var(--_surface); padding: 8px 12px; border-bottom: 1px solid var(--_border); white-space: nowrap; }
+.b2y-ai-table td { padding: 8px 12px; border-bottom: 1px solid var(--_border); }
+.b2y-ai-table tbody tr:last-child td { border-bottom: 0; }
+.b2y-ai-table tbody tr:hover td { background: var(--_accent-soft); }
+.b2y-ai-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.b2y-ai-muted { color: var(--_muted); font-size: 12px; margin: 6px 12px; }
+.b2y-ai-chart svg { width: 100%; height: auto; display: block; padding: 8px 8px 4px; }
+.b2y-ai-axis { stroke: var(--_border); }
+.b2y-ai-grid { stroke: var(--_border); stroke-dasharray: 3 4; opacity: 0.7; }
+.b2y-ai-tick { font-size: 10px; fill: var(--_muted); }
+.b2y-ai-legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; color: var(--_muted); padding: 0 12px 10px; }
+.b2y-ai-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: middle; }
+.b2y-ai-notice { border-radius: 12px; padding: 10px 12px; font-size: 13px; }
+.b2y-ai-notice ul { margin: 2px 0 0; padding-left: 18px; }
+.b2y-ai-notice-info { background: #eff6ff; color: #1e3a8a; border: 1px solid #bfdbfe; }
+.b2y-ai-notice-warning { background: #fffbeb; color: #78350f; border: 1px solid #fde68a; }
+.b2y-ai-sources { font-size: 12px; color: var(--_muted); display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.b2y-ai-sources a, .b2y-ai-sources span + span { padding: 2px 8px; border-radius: 999px; background: var(--_surface); border: 1px solid var(--_border); color: var(--_accent); text-decoration: none; }
+
+/* Empty, loading and error states */
+.b2y-ai-empty { margin: auto; max-width: 560px; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 14px; padding: 24px 8px; animation: b2y-ai-in 0.25s ease-out; }
+.b2y-ai-empty-icon { display: inline-flex; align-items: center; justify-content: center; width: 52px; height: 52px; border-radius: 16px; color: var(--_accent); background: var(--_accent-soft); }
+.b2y-ai-intro { color: var(--_muted); margin: 0; font-size: 14.5px; }
+.b2y-ai-suggestions { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; width: 100%; }
+.b2y-ai-suggestions button { text-align: left; border: 1px solid var(--_border); background: var(--_bg); border-radius: 12px; padding: 10px 12px; font-size: 13px; cursor: pointer; color: var(--_text); transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s; }
+.b2y-ai-suggestions button:hover { border-color: var(--_accent); box-shadow: 0 4px 12px rgba(16, 24, 40, 0.06); transform: translateY(-1px); }
+.b2y-ai-restoring { margin: auto; display: flex; flex-direction: column; align-items: center; gap: 8px; color: var(--_muted); font-size: 13px; }
+.b2y-ai-error { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; align-self: flex-start; margin-left: 40px; background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; border-radius: 12px; padding: 9px 12px; font-size: 13px; animation: b2y-ai-in 0.2s ease-out; }
+.b2y-ai-error span { flex: 1; min-width: 160px; }
+.b2y-ai-error button { border: 1px solid #fca5a5; background: #fff; color: inherit; border-radius: 8px; padding: 3px 10px; cursor: pointer; font-size: 12px; font-weight: 500; }
+.b2y-ai-error button:hover:not(:disabled) { background: #fee2e2; }
+
+/* Composer */
+.b2y-ai-composer { padding: 10px 16px 12px; border-top: 1px solid var(--_border); background: var(--_bg); }
+.b2y-ai-input { display: flex; align-items: flex-end; gap: 8px; border: 1px solid var(--_border); border-radius: 14px; padding: 6px 6px 6px 14px; background: var(--_bg); transition: border-color 0.15s, box-shadow 0.15s; }
+.b2y-ai-input:focus-within { border-color: var(--_accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--_accent) 18%, transparent); }
+.b2y-ai-input textarea { flex: 1; resize: none; border: 0; outline: 0; background: transparent; padding: 7px 0; font: inherit; color: var(--_text); min-height: 22px; max-height: 160px; field-sizing: content; }
+.b2y-ai-send { flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; background: var(--_accent); color: #fff; border: 0; border-radius: 10px; cursor: pointer; transition: opacity 0.15s, transform 0.15s; }
+.b2y-ai-send:hover:not(:disabled) { transform: translateY(-1px); }
+.b2y-ai-send:disabled { opacity: 0.4; cursor: default; }
+.b2y-ai-hint { margin: 6px 2px 0; font-size: 11px; color: var(--_muted); }
+
+/* Typing indicator */
+.b2y-ai-typing { display: inline-flex; gap: 5px; align-items: center; padding: 13px 16px; background: var(--_bg); border: 1px solid var(--_border); border-radius: 6px 18px 18px 18px; }
+.b2y-ai-typing span { width: 7px; height: 7px; border-radius: 50%; background: var(--_accent); opacity: 0.3; animation: b2y-ai-dot 1.3s infinite ease-in-out; }
+.b2y-ai-typing span:nth-child(2) { animation-delay: 0.16s; }
+.b2y-ai-typing span:nth-child(3) { animation-delay: 0.32s; }
+@keyframes b2y-ai-dot { 0%, 70%, 100% { opacity: 0.3; transform: translateY(0) scale(0.9); } 35% { opacity: 1; transform: translateY(-4px) scale(1); } }
+@keyframes b2y-ai-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+@media (max-width: 640px) {
+  .b2y-ai-chat { border-radius: 14px; }
+  .b2y-ai-theme .b2y-ai-row-assistant > .b2y-ai-avatar { display: none; }
+  .b2y-ai-title span:not(.b2y-ai-avatar), .b2y-ai-ghost span, .b2y-ai-hint { display: none; }
+  .b2y-ai-bubble, .b2y-ai-bubble-user { max-width: 92%; }
+  .b2y-ai-row-assistant > .b2y-ai-avatar { display: none; }
+  .b2y-ai-error { margin-left: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .b2y-ai-typing span { animation: none; opacity: 0.7; }
+  .b2y-ai-row, .b2y-ai-empty, .b2y-ai-history, .b2y-ai-error { animation: none; }
+  .b2y-ai-messages { scroll-behavior: auto; }
+}

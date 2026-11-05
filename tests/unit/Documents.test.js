@@ -8,7 +8,6 @@ import {
   buildSearchIndex,
   createAiService,
   createDocumentQaAgent,
-  createFolderDocumentStore,
   createTaskRegistry,
   defineApplicationProfile,
   DOCUMENT_ANSWER_TASK,
@@ -16,8 +15,12 @@ import {
   ErrorCodes,
   searchIndex,
   splitIntoPassages,
-  tokenize,
 } from "../../src/index.js";
+import { createFolderDocumentStore } from "../../src/documents/FolderDocumentStore.js";
+
+/** The example shop's own kinds of document (the folder store's default list is neutral). */
+const SHOP_DOCUMENT_TYPES = ["policy", "privacy", "terms", "faq", "guide", "other"];
+import { tokenize } from "../../src/documents/DocumentSearch.js";
 import { extractPdfText } from "../../src/documents/PdfText.js";
 import { expectAiError } from "../helpers/Assertions.js";
 import { FakeProvider, reply } from "../helpers/FakeProvider.js";
@@ -87,7 +90,7 @@ describe("folder document store", () => {
   });
 
   it("keeps each application's documents in its own private folder", async () => {
-    const store = createFolderDocumentStore({ root });
+    const store = createFolderDocumentStore({ root, documentTypes: SHOP_DOCUMENT_TYPES });
     const added = await store.addDocument("ecommerce", {
       title: "Return policy",
       type: "policy",
@@ -106,7 +109,7 @@ describe("folder document store", () => {
   });
 
   it("refuses application ids that could leave the root, and invalid documents", async () => {
-    const store = createFolderDocumentStore({ root });
+    const store = createFolderDocumentStore({ root, documentTypes: SHOP_DOCUMENT_TYPES });
     for (const id of ["../etc", "Ecommerce", "a/b", "", ".."]) {
       await expectAiError(() => store.loadIndex(id), ErrorCodes.INPUT_INVALID);
     }
@@ -123,7 +126,7 @@ describe("document question answering", () => {
   let store;
   before(async () => {
     root = await mkdtemp(join(tmpdir(), "ai-docs-"));
-    store = createFolderDocumentStore({ root });
+    store = createFolderDocumentStore({ root, documentTypes: SHOP_DOCUMENT_TYPES });
     await store.addDocument("ecommerce", { title: "Return policy", type: "policy", text: RETURN_POLICY });
     await store.addDocument("ecommerce", { title: "FAQ", type: "faq", text: FAQ });
   });
@@ -185,7 +188,7 @@ describe("document question answering", () => {
   });
 
   it("frames document text as untrusted data and reports embedded instructions", async () => {
-    const injected = createFolderDocumentStore({ root });
+    const injected = createFolderDocumentStore({ root, documentTypes: SHOP_DOCUMENT_TYPES });
     await injected.addDocument("ecommerce", {
       title: "Refund rules",
       type: "policy",

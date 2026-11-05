@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-/** Dotted lowercase identifiers such as "lead.summary". */
+/** Dotted lowercase identifiers such as "ticket.summary". */
 export const taskIdSchema = z
   .string()
   .max(100)

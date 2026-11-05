@@ -10,7 +10,7 @@ import { EMPTY_TOKEN_USAGE } from "../usage/Usage.js";
 import { parseStructuredOutput } from "../validation/StructuredOutput.js";
 import { summarizeZodError } from "../validation/ZodIssues.js";
 import { noopLogger } from "./Logger.js";
-import { retryPolicySchema, withRetry } from "./Retry.js";
+import { INVALID_OUTPUT_CODES, retryPolicySchema, withRetry } from "./Retry.js";
 
 /**
  * @typedef {Object} AiServiceOptions
@@ -128,24 +128,32 @@ export function createAiService(options) {
       jsonSchema: { name: task.id.replace(/[^A-Za-z0-9_-]/g, "_"), schema: task.outputJsonSchema },
     };
 
-    const result = await withRetry(
-      (attempt) => {
-        state.attempts = attempt;
-        return provider.complete(request, signal === undefined ? {} : { signal });
-      },
-      retryPolicy,
-      signal,
-    );
-    state.tokens = result.usage;
+    for (let invalidOutputs = 0; ; invalidOutputs += 1) {
+      try {
+        const result = await withRetry(
+          () => {
+            state.attempts += 1;
+            return provider.complete(request, signal === undefined ? {} : { signal });
+          },
+          retryPolicy,
+          signal,
+        );
+        state.tokens = result.usage;
 
-    const output = parseStructuredOutput(result.content, task.outputSchema, result.finishReason);
-    const verdict = task.postValidate ? task.postValidate(output, parsedInput.data) : { ok: true };
-    if (!verdict.ok) {
-      throw new AiServiceError(ErrorCodes.OUTPUT_REJECTED, "Model output was rejected by task validation", {
-        details: { taskId: task.id, reason: verdict.reason.slice(0, 100) },
-      });
+        const output = parseStructuredOutput(result.content, task.outputSchema, result.finishReason);
+        const verdict = task.postValidate ? task.postValidate(output, parsedInput.data) : { ok: true };
+        if (!verdict.ok) {
+          throw new AiServiceError(ErrorCodes.OUTPUT_REJECTED, "Model output was rejected by task validation", {
+            details: { taskId: task.id, reason: verdict.reason.slice(0, 100) },
+          });
+        }
+        return output;
+      } catch (error) {
+        // Invalid model output is retried only when the service opted in (retry.invalidOutputRetries).
+        const invalid = error instanceof AiServiceError && INVALID_OUTPUT_CODES.has(error.code);
+        if (!invalid || invalidOutputs >= retryPolicy.invalidOutputRetries || signal?.aborted === true) throw error;
+      }
     }
-    return output;
   }
 
   async function runTask(task, contextInput, input, runOptions = {}) {

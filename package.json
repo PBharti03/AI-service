@@ -1,7 +1,7 @@
 {
   "name": "@b2y/ai-service",
-  "version": "0.1.0",
-  "description": "Reusable, task-oriented AI orchestration for B2Y applications: trusted context, schema-validated structured output, text-to-SQL and document question answering.",
+  "version": "0.6.3",
+  "description": "Reusable, application-independent AI assistant for B2Y applications: consumer-supplied context, permissions and capabilities, routing to data, analytics, documents, research or advice, conversation history with retention, provider abstraction and a reusable chat UI.",
   "private": true,
   "license": "UNLICENSED",
   "type": "module",
@@ -10,6 +10,10 @@
     ".": "./src/index.js",
     "./text-to-sql/postgres": "./src/text-to-sql/postgres/index.js",
     "./documents/pdf": "./src/documents/PdfText.js",
+    "./documents/folder": "./src/documents/FolderDocumentStore.js",
+    "./conversations/folder": "./src/conversations/FolderConversationStore.js",
+    "./ui/react": "./src/ui/react/AssistantChat.js",
+    "./ui/react/styles.css": "./src/ui/react/styles.css",
     "./package.json": "./package.json"
   },
   "files": [
@@ -28,6 +32,7 @@
   },
   "peerDependencies": {
     "libpg-query": "^17.8.2",
+    "react": ">=18",
     "unpdf": "^1.9.1"
   },
   "peerDependenciesMeta": {
@@ -36,12 +41,17 @@
     },
     "unpdf": {
       "optional": true
+    },
+    "react": {
+      "optional": true
     }
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
     "eslint": "10.14.0",
     "libpg-query": "17.8.2",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
     "unpdf": "1.9.1"
   }
 }

@@ -6,15 +6,15 @@ import { summarizeZodError } from "../validation/ZodIssues.js";
 /**
  * Who the assistant is speaking for. Each application that uses this package defines one profile in its
  * own code (never from user input): the greeting, "what can you do?" answers and refusals for topics the
- * application does not cover are all based on it, so the same package answers differently in Lead
- * Tracker and in an e-commerce shop.
+ * application does not cover are all based on it, so the same package answers differently in each
+ * application that uses it.
  *
  * @typedef {Object} ApplicationProfile
- * @property {string} id - Matches the trusted context's applicationId (for example "lead-tracker").
- * @property {string} name - Shown to users, for example "Lead Tracker".
+ * @property {string} id - Matches the trusted context's applicationId (for example "example-app").
+ * @property {string} name - Shown to users, for example "Example App".
  * @property {string} description - One or two sentences on what the application is for.
  * @property {readonly string[]} capabilities - What the assistant can help with here, as short phrases.
- * @property {readonly string[]} outOfScope - Topics the application does not cover (for example "return policy").
+ * @property {readonly string[]} outOfScope - Topics the application does not cover (for example "payments").
  */
 
 const profileSchema = z.strictObject({
@@ -23,6 +23,13 @@ const profileSchema = z.strictObject({
   description: z.string().trim().min(1).max(400),
   capabilities: z.array(z.string().trim().min(1).max(120)).min(1).max(12),
   outOfScope: z.array(z.string().trim().min(1).max(80)).max(20).default([]),
+  /** Optional: the business domain in a few words, for example "online retail" or "property sales". */
+  domain: z.string().trim().min(1).max(60).optional(),
+  /** Optional: the application's own words and what they mean, so answers use its terminology. */
+  terminology: z
+    .array(z.strictObject({ term: z.string().trim().min(1).max(40), meaning: z.string().trim().min(1).max(160) }))
+    .max(30)
+    .default([]),
 });
 
 const definedProfiles = new WeakSet();
@@ -43,6 +50,7 @@ export function defineApplicationProfile(input) {
     ...result.data,
     capabilities: Object.freeze([...result.data.capabilities]),
     outOfScope: Object.freeze([...result.data.outOfScope]),
+    terminology: Object.freeze(result.data.terminology.map((entry) => Object.freeze({ ...entry }))),
   });
   definedProfiles.add(profile);
   return profile;

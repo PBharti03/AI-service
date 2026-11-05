@@ -1,4 +1,4 @@
-import { ErrorCodes } from "./ErrorCodes.js";
+import { ErrorCategories, ErrorCodes } from "./ErrorCodes.js";
 
 /**
  * @typedef {string | number | boolean} ErrorDetailValue
@@ -97,4 +97,12 @@ function toSafeCause(cause) {
   const name = cause instanceof Error && SAFE_NAME.test(cause.name) ? cause.name : typeof cause;
   const code = systemErrorCode(cause);
   return Object.freeze(code === undefined ? { name } : { name, code });
+}
+
+/**
+ * The category of an error (see ErrorCategories): "rate_limit", "authorization", "provider" ... and
+ * "internal" for anything that is not an AiServiceError.
+ */
+export function errorCategory(error) {
+  return error instanceof AiServiceError && Object.hasOwn(ErrorCategories, error.code) ? ErrorCategories[error.code] : "internal";
 }

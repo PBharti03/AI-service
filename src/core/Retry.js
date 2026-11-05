@@ -15,7 +15,16 @@ import { AiServiceError, createCancelledError } from "../errors/AiServiceError.j
 export const retryPolicySchema = z.strictObject({
   maxRetries: z.number().int().min(0).max(3).default(0),
   baseDelayMs: z.number().int().min(0).max(30_000).default(500),
+  /**
+   * Extra attempts when the model's output is invalid (unparseable, off-schema, refused by task
+   * validation or rejected by the provider's constrained decoding). Model output varies between
+   * attempts, so a second try often succeeds. Off by default.
+   */
+  invalidOutputRetries: z.number().int().min(0).max(2).default(0),
 });
+
+/** Codes of failures caused by the model's output rather than the request. */
+export const INVALID_OUTPUT_CODES = new Set(["PROVIDER_OUTPUT_REJECTED", "OUTPUT_PARSE_FAILED", "OUTPUT_SCHEMA_INVALID", "OUTPUT_REJECTED"]);
 
 export async function withRetry(operation, policy, signal, wait = abortableWait) {
   for (let attempt = 1; ; attempt += 1) {

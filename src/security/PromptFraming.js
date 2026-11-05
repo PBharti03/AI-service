@@ -16,7 +16,7 @@ export function composeSystemPrompt(instructions, outputJsonSchema) {
 
 /**
  * User message carrying task data. The data is JSON-encoded and `<`, `>`, `&`
- * and line/paragraph separators are \u-escaped, so text inside a lead note
+ * and line/paragraph separators are \u-escaped, so text inside a user's note
  * cannot close the untrusted_data block or impersonate the surrounding prompt.
  */
 export function frameUntrustedData(label, data) {

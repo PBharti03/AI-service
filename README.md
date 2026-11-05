@@ -1,98 +1,305 @@
 # @b2y/ai-service
 
-Reusable, task-oriented AI orchestration for B2Y applications, in plain JavaScript (ES modules, no build
-step; types are documented with JSDoc).
+Reusable, application-independent AI orchestration for B2Y applications (Lead Tracker, Ecommerce and
+future applications), in plain JavaScript: ES modules, no build step, types documented with JSDoc.
+Works with `import`, and from CommonJS with `require` on Node.js 20.19+.
 
-The package runs **registered tasks** against **one OpenAI-compatible model server** (Groq, or a
-self-hosted Ollama/vLLM) and returns **schema-validated JSON** or a typed error. On top of that it offers:
-
-- **Application profiles and chat**: the assistant always speaks as the application that uses the package
-  (its own greeting, capabilities and polite answers for topics it does not cover).
-- **Text-to-SQL**: the model writes one read-only SELECT, which is parsed with PostgreSQL's own grammar,
-  checked against an allow-list policy and parameterised. The application runs it with its own read-only
-  database role.
-- **Document question answering**: each application adds its own policies, privacy notice, FAQ or
-  questionnaires (PDF or text); answers come only from that application's documents, with sources.
-
-It has no database connection, no tools, no agent loop and no automatic fallback to another provider.
+The package knows no application: no tables, columns, business terms or storage layout. Each consumer
+supplies its context, permissions, catalog, executors and documents; the package supplies validated,
+fail-closed building blocks around one model provider.
 
 Private package, not published.
 
-## Responsibilities
+## Architecture
 
-| The application owns | This package owns |
-|---|---|
-| Authentication, tenant resolution, RBAC, resource ownership | Validating the `TrustedContext` it is given |
-| Its application profile and its documents folder | Speaking only as that profile; reading only that application's documents |
-| Database connections and a read-only role | Generating and validating SQL; it never executes SQL |
-| Quotas, persistence, audit, UI | Usage metadata for metering (`onUsage`), schema-validated output or a typed error |
-
-The package never authenticates anyone, never grants permissions and never reads identity from prompts,
-task input or model output.
-
-## Usage
-
-Works with `import` and, on Node.js 20.19+, with `require` (`require(esm)`).
-
-```js
-const {
-  createAiService, createOpenAICompatibleProvider, createTaskRegistry,
-  defineApplicationProfile, createChatAssistant, ASSISTANT_CHAT_TASK, ASSISTANT_CHAT_TASK_ID,
-  createFolderDocumentStore, createDocumentQaAgent, DOCUMENT_ANSWER_TASK, DOCUMENT_ANSWER_TASK_ID,
-} = require("@b2y/ai-service");
-
-const profile = defineApplicationProfile({
-  id: "ecommerce", // must equal the trusted context's applicationId
-  name: "B2Y Shop",
-  description: "An online shop selling home goods.",
-  capabilities: ["order help", "return, refund and shipping policy questions"],
-  outOfScope: ["lead statistics"],
-});
-
-const ai = createAiService({
-  provider: createOpenAICompatibleProvider({
-    id: "groq", kind: "PAID", baseUrl: "https://api.groq.com/openai/v1", model: "openai/gpt-oss-20b",
-    apiKey: process.env.GROQ_API_KEY, timeoutMs: 60_000, allowedClassifications: ["SYNTHETIC", "INTERNAL"],
-    structuredOutput: "json_schema",
-  }),
-  registry: createTaskRegistry([ASSISTANT_CHAT_TASK, DOCUMENT_ANSWER_TASK]),
-  allowPaidProvider: true,
-});
-
-const chat = createChatAssistant({ ai, profile });
-const documents = createDocumentQaAgent({ ai, profile, store: createFolderDocumentStore({ root: "/var/lib/shop/ai-documents" }) });
-
-// context comes from the app's authenticated request, never from the client or the model
-const context = { applicationId: "ecommerce", tenantId: "t1", actor: { type: "USER", userId: "u1" }, requestId: "r1",
-  permittedTasks: [ASSISTANT_CHAT_TASK_ID, DOCUMENT_ANSWER_TASK_ID], dataClassification: "INTERNAL" };
-
-const found = await documents.answer({ question: "What is the return policy?", context });
-if (found.status !== "ANSWERED") {
-  const result = await chat.reply({ question: "What is the return policy?", context, documentsAvailable: found.status !== "NO_DOCUMENTS" });
-}
+```
+consumer backend (authentication, tenancy, RBAC, data access)
+   │  trusted context · application profile · SQL policy + catalog · executors · tools · document source
+   ▼
+@b2y/ai-service
+   core         createAiService: task registry, permission + classification checks, prompt framing,
+                provider call, strict output validation, retries, metering
+   providers    ChatProvider interface ── Groq · Ollama (local) · any OpenAI-compatible server
+   tools        defineTool / createToolRegistry: read-only, input-validated, consumer-executed
+   analytics    planner task → SQL AST validation → consumer executor → merge, charts, observations
+   documents    consumer DocumentSource → passages → cited answers
+   assistant    application profile + chat
 ```
 
-### Documents
+Query results, tool results and document storage never pass through the model except the document
+passages a source returns for a question.
 
-- Add documents with `store.addDocument(applicationId, { title, type, text, fileName })`. Types: `policy`,
-  `privacy`, `terms`, `faq`, `questionnaire`, `guide`, `other`. Extract PDF text with
-  `extractPdfText(bytes)` from `@b2y/ai-service/documents/pdf` (optional peer dependency `unpdf`, Node.js 22+;
-  scanned PDFs without a text layer need OCR first).
-- The folder store keeps `<root>/<applicationId>/documents/*.json` and `index.json` (folders 0700, files 0600).
-  Any object with the same methods (`addDocument`, `removeDocument`, `listDocuments`, `loadIndex`) can replace it.
-- Search is local keyword search (BM25); nothing is embedded or sent anywhere. Only the best matching
-  passages (at most 8, 1,500 characters each) go to the model, which must cite them. `NO_DOCUMENTS` and
-  unmatched questions return without a model call.
-- Isolation: the agent reads only `profile.id`'s documents and refuses a request whose trusted
-  `applicationId` is different.
+## Consumer responsibilities
 
-### Text-to-SQL
+The package enforces the context and contracts it is given; it never implements the application's own
+security. Each consumer is responsible for:
 
-`defineSqlPolicy({ dialect, schema, policy })` describes the tables and columns the model may see and use;
-`createPostgresSqlValidator(policy)` (from `@b2y/ai-service/text-to-sql/postgres`, optional peer dependency
-`libpg-query`) checks one statement; `createTextToSqlAgent({ ai, validator })` generates, validates and
-retries once. The result is a `ValidatedQuery` (parameterised SQL, row limit applied) for the application's
-own read-only executor; check what it returns with `checkQueryResult`.
+| Responsibility | The consumer does | The package does |
+|---|---|---|
+| **Authentication** | Signs users in and verifies sessions or tokens | Nothing: it never sees credentials or sessions |
+| **Tenant resolution** | Decides which tenant a request belongs to and puts it in `tenantId` | Validates and freezes the context; passes it to tools and document sources |
+| **Authorization / RBAC** | Decides what the user may do; lists the AI tasks in `permittedTasks` and grants in `permissions` | Refuses tasks not in `permittedTasks`; refuses tools, analytics or other features whose required permission is missing (`NOT_AUTHORIZED`) |
+| **Subscription / feature checks** | Decides the tenant's plan; lists enabled features in `features` | Refuses whatever `requires` a feature that is not listed (`FEATURE_NOT_ENABLED`) |
+| **Data classification** | Sets the most sensitive data a request may send to the model | Refuses tasks or providers that do not allow that classification |
+| **Database access** | Owns connections and a read-only role; runs only `isValidatedQuery()` statements | Supplies the SQL policy check, parameterisation, row and time limits; never connects to a database |
+| **Analytics catalog** | Describes its tables (`defineSqlPolicy`), measures and limitations (`defineAnalyticsCatalog`) | Plans, validates, merges and describes results; never sends results to the model |
+| **Document storage and authorization** | Stores documents and returns only the passages the context may see (`defineDocumentSource`) | Validates passages, answers only from them, requires citations, refuses other applications' contexts |
+| **Business tools** | Defines each tool, its input schema, required permission or feature, and executor (`defineTool`) | Validates context, requirements, input and result; only read-only tools; results never reach the model |
+| **Provider choice and keys** | Picks the provider and keeps its API key secret | Endpoint policy, request limits, typed errors; paid hosts limited to `APPROVED_PAID_HOSTS` |
+| **Persistence, audit, quotas, UI** | Stores conversations, enforces quotas, renders answers | Usage metadata (`onUsage`) and typed errors |
+
+Nothing application-specific lives in the package: no tables, columns, business terms, document kinds or
+storage layout. Prompts are generic and filled only from what the consumer supplies (profile, schema,
+catalog, document titles and types).
+
+## Application context
+
+Every call takes a trusted context built by the consumer from its own authenticated request, never from
+the client, a prompt or the model:
+
+```js
+const context = {
+  applicationId: "ecommerce",            // isolates profiles and documents
+  tenantId: "t-42",                      // passed to tools and document sources for scoping
+  actor: { type: "USER", userId: "u-7" },
+  requestId: "req-123",
+  permittedTasks: ["assistant.chat", "documents.answer", "analytics.plan"],
+  dataClassification: "INTERNAL",        // the most sensitive data this request may send to the model
+  permissions: ["orders:read"],          // optional: what the consumer granted
+  features: ["analytics"],               // optional: subscription features enabled for the tenant
+};
+```
+
+The schema is strict (unknown fields are refused) and the parsed context is frozen. The package never
+authenticates or grants anything: `assertAuthorized(context, { permission, feature })`, `hasPermission`
+and `hasFeature` only check the consumer's own lists, and a context without them grants nothing.
+
+## Providers
+
+All provider-specific code sits behind the `ChatProvider` interface; consumers only pass a provider to
+`createAiService`. `createProvider(config)` builds one from configuration, so switching provider is a
+configuration change:
+
+```js
+const provider = createProvider({
+  type: "groq",                                   // "groq" | "ollama" | "openai-compatible"
+  apiKey: process.env.GROQ_API_KEY,
+  model: "openai/gpt-oss-120b",
+  allowedClassifications: ["SYNTHETIC", "INTERNAL"], // required: there is no default
+});
+const ai = createAiService({ provider, registry: createTaskRegistry([...tasks]), allowPaidProvider: true });
+```
+
+- `groq`: paid, `https://api.groq.com/openai/v1`. Needs `allowPaidProvider: true` on the service.
+- `ollama`: local development, loopback only, `SYNTHETIC` data only.
+- `openai-compatible`: any other server (`createOpenAICompatibleProvider` options), under the endpoint
+  policy below. A new **paid** host must first be added to `APPROVED_PAID_HOSTS` in this package.
+
+Invalid configuration (unknown type or field, missing key or classifications) throws `CONFIG_INVALID`
+before any request. HTTP 429 becomes `PROVIDER_RATE_LIMITED` with `details.retryAfterSeconds` (from
+`Retry-After`, at most 300).
+
+## Errors
+
+The package throws only `AiServiceError` with a `code` from `ErrorCodes`; `errorCategory(error)` (backed by
+`ErrorCategories`) maps it
+to `configuration`, `context`, `authorization`, `validation`, `provider`, `rate_limit`, `output`,
+`execution`, `cancelled` or `internal` (anything foreign is `internal`). Messages and details carry
+codes, counts, statuses and schema paths only, never input values, model output or credentials.
+
+## AI assistant (copilot)
+
+`createAiAssistant` is the main entry point: one assistant per application, answering any message through
+the capabilities the application exposes, general reasoning and advice, or optional research.
+
+```js
+const assistant = createAiAssistant({
+  ai,                      // createAiService({ provider, registry: createTaskRegistry([ASSISTANT_ROUTE_TASK, ASSISTANT_RESPOND_TASK, ...capability tasks]) })
+  profile,                 // defineApplicationProfile({ id, name, description, capabilities, domain, terminology })
+  capabilities: [sales],   // defineCapability / createAnalyticsCapability / createDocumentsCapability
+  history,                 // optional: createConversationHistory({ store, retentionDays })
+  research,                // optional: defineResearchProvider({ id, search })
+});
+const { conversationId, status, blocks } = await assistant.reply({ message, context, conversationId });
+```
+
+For each message the assistant:
+
+1. checks the trusted context against the profile, and loads the user's recent conversation;
+2. decides **in code** which capabilities the context grants (`requires: { permission, feature }`);
+3. asks the model to route the message to a granted capability, `general` reasoning/advice, `research`
+   (only when a provider is configured) or `unsupported`. Any other answer falls back to `general`;
+4. runs the capability (read-only, with its own timeout and validated result), or writes the answer with
+   the model. Advice ("why did sales fall?", "what should I improve?") is grounded in the **facts** of the
+   capabilities the router names, but only those whose definition sets `shareFacts`;
+5. returns **blocks** (paragraph, heading, bullets, metrics, table, chart, notice, sources) a UI can render.
+   Replies never contain SQL, tool names, internal ids or raw JSON.
+
+```js
+const sales = createAnalyticsCapability({
+  id: "sales", title: "Sales statistics", description: "Orders, revenue, products and stores",
+  requires: { permission: "orders:report", feature: "orders" },
+  createAssistant: (context) => createAnalyticsAssistant({ ai, validator, catalog, executor: scopedExecutor(context) }),
+  shareFacts: (section) => true,   // which result sections' observations may reach the model; omit to share none
+});
+```
+
+**Security model.** The application stays the source of truth for authentication, tenant, roles,
+permissions, subscriptions and ownership. The model never sees ungranted capabilities, cannot choose a
+tenant or scope, and cannot run anything that code did not authorise. Only read-only capabilities exist.
+Query results reach the model only as facts the application explicitly shares (computed statements,
+never rows), and data-based answers are never fed back to the model as history.
+
+## Conversations and retention
+
+```js
+const history = createConversationHistory({ store: createMemoryConversationStore(), retentionDays: 7 }); // default 14, at most 14
+await history.cleanupExpiredConversations();         // from the application's own daily cron job
+scheduleConversationCleanup({ history });             // or: optional unref'd timer, no extra server
+```
+
+History is scoped to application, tenant and user from the trusted context; a conversation id from
+another user or tenant finds nothing. Stored: scope ids, message text and blocks, route and status. Never
+tokens, credentials or context grants. Conversations inactive for longer than the retention period read
+as gone and are deleted by cleanup. Stores: `createMemoryConversationStore()` (single process),
+`createFolderConversationStore({ root })` from `@b2y/ai-service/conversations/folder` (one server, private
+files), or any `defineConversationStore({ appendMessage, listMessages, listConversations, deleteConversation, deleteInactiveSince })`.
+
+Applications with their own reply format can keep it with a message: `history.append({ ..., appData })`
+(JSON, at most 64 KiB). `history.load` returns it to the application's server so it can restore its own
+screens; it is never shown to the model, and `assistant.loadConversation` does not return it.
+
+## Research
+
+`defineResearchProvider({ id, search })` plugs in a web or knowledge search. Without one, the assistant
+says plainly that current information is not available instead of guessing. Answers that use research
+cite their sources.
+
+## Chat UI
+
+`@b2y/ai-service/ui/react` (React 18+, optional peer dependency, no other dependency) exports
+`AssistantChat`, `AssistantMessage`, `TypingIndicator` and `restoreConversation`; import
+`@b2y/ai-service/ui/react/styles.css` and theme it with CSS variables (`--b2y-ai-accent`, `--b2y-ai-text`,
+`--b2y-ai-border`, `--b2y-ai-height` ...). The application supplies placement, theme, labels and its own
+authenticated API calls; the component handles messages, the three-dot typing indicator, loading and
+error states with retry, new chat, recent chats and block rendering (paragraphs, lists, metric cards,
+tables, charts, notices, sources).
+
+```jsx
+<AssistantChat
+  send={({ message, conversationId }) => api.post("/ai/chat", { message, conversationId })}
+  loadConversation={(id) => api.get(`/ai/conversations/${id}`)}   // the user's messages, or []
+  listConversations={() => api.get("/ai/conversations")}          // the user's recent conversations
+/>
+```
+
+Chats live on the server (see Conversations), not in the browser: with `listConversations`, the chat
+reopens the user's most recent conversation after a refresh, in a new tab or after signing in again.
+`conversationId` opens a given conversation, `null` starts a new one; New chat starts a new conversation
+on the next message. The server scopes every list and load to the verified application, tenant and user.
+
+## Tool contract
+
+```js
+const ordersCount = defineTool({
+  name: "orders.count",
+  description: "Counts the tenant's orders with a status",
+  access: "read",                                   // the only supported value; "write" is refused
+  inputSchema: z.strictObject({ status: z.enum(["open", "shipped"]) }),
+  outputSchema: z.strictObject({ count: z.number().int() }),   // optional
+  requires: { permission: "orders:read", feature: "analytics" }, // optional
+  timeoutMs: 5000,                                  // default 5 s, at most 60 s
+  execute: async (input, { context, signal }) => ({ count: await myDb.countOrders(context.tenantId, input.status, signal) }),
+});
+const tools = createToolRegistry([ordersCount]);
+const { output } = await tools.run("orders.count", { status: "open" }, context);
+```
+
+`run` checks the context, the requirement and the input before `execute` runs; it maps timeouts,
+cancellation, failures and invalid or oversized results (64 KiB default) to `TOOL_*` errors, and returns
+a detached JSON copy. `tools.list(context)` describes the usable tools with their input as JSON Schema.
+Tool results go back to the caller only; the package never sends them to a model.
+
+## Analytics contract
+
+```js
+const validator = createPostgresSqlValidator(defineSqlPolicy({ dialect: "postgres", schema, policy })); // from "@b2y/ai-service/text-to-sql/postgres"
+const analytics = createAnalyticsAssistant({
+  ai,                                   // with ANALYTICS_PLAN_TASK registered
+  validator,                            // the consumer's tables, columns, allowed values and rules
+  executor: (validatedQuery) => myReadOnlyDb.run(validatedQuery), // must accept only isValidatedQuery()
+  catalog: defineAnalyticsCatalog({ metrics, dimensions, limitations, labels, valueLabels, locale }),
+  notes,                                // optional facts added to answers, decided from validated queries
+  limits: { maxQueries: 4, maxTotalRows: 600, timeoutMs: 15000 }, // these are the maximums
+  requires: { feature: "analytics" },   // optional
+});
+const report = await analytics.answer({ question, context, conversation });
+```
+
+The model plans 1-4 independent statements from the question, the policy-filtered schema and the
+catalog. Every statement passes the PostgreSQL AST validator (allowed tables, columns and values,
+parameterised literals, row limit; joins, set operations and aggregation are policy settings) before the
+consumer's executor runs it, one at a time, within the limits. Results are checked, lined up on a shared
+key in code, charted and described with evidence-backed observations. Results never reach the model.
+Earlier turns' SQL is re-validated on every follow-up. `createAnalyticsRouter({ topicPattern })` routes
+messages cheaply without treating every message after an analytics answer as analytics; pass
+`generalPattern` for the application's own non-analytics topics.
+
+The single-statement `createTextToSqlAgent` remains available.
+
+## Document-store contract
+
+```js
+const source = defineDocumentSource({
+  count: async ({ context }) => myStore.count(context.tenantId),
+  retrieve: async ({ question, context, limit, signal }) => myStore.search(context.tenantId, question, limit),
+  // returns [{ documentId, title, type?, text (≤ 1500 chars), score? }]
+});
+const documents = createDocumentQaAgent({ ai, profile, source }); // with DOCUMENT_ANSWER_TASK registered
+const found = await documents.answer({ question, context });       // ANSWERED | NOT_FOUND | NO_DOCUMENTS
+```
+
+The consumer stores, retrieves and authorises; the package validates every passage (unknown fields,
+oversized text or too many passages are `DOCUMENT_SOURCE_INVALID`), sends only those passages to the
+model, and accepts only answers that cite them. The agent refuses contexts of another application.
+
+Optional building blocks: local keyword search (`buildSearchIndex`, `searchIndex`,
+`createIndexDocumentSource({ loadIndex })`), PDF text extraction (`@b2y/ai-service/documents/pdf`,
+peer dependency `unpdf`, Node.js 22+) and a simple local filesystem store
+(`createFolderDocumentStore({ root, documentTypes })` from `@b2y/ai-service/documents/folder`: one private
+folder per application, no tenants; `documentTypes` lists the kinds of document it accepts).
+
+## Minimal example (CommonJS)
+
+```js
+const { createAiService, createProvider, createTaskRegistry, defineApplicationProfile, createChatAssistant,
+  ASSISTANT_CHAT_TASK, ASSISTANT_CHAT_TASK_ID } = require("@b2y/ai-service");
+
+const ai = createAiService({
+  provider: createProvider({ type: "groq", apiKey: process.env.GROQ_API_KEY, model: "openai/gpt-oss-20b", allowedClassifications: ["INTERNAL"] }),
+  registry: createTaskRegistry([ASSISTANT_CHAT_TASK]),
+  allowPaidProvider: true,
+});
+const profile = defineApplicationProfile({ id: "ecommerce", name: "B2Y Shop", description: "An online shop selling home goods.", capabilities: ["order help"] });
+const chat = createChatAssistant({ ai, profile });
+
+const context = { applicationId: "ecommerce", tenantId: "t-42", actor: { type: "USER", userId: "u-7" }, requestId: "req-1",
+  permittedTasks: [ASSISTANT_CHAT_TASK_ID], dataClassification: "INTERNAL" };
+const { output } = await chat.reply({ question: "Hello", context, documentsAvailable: false });
+```
+
+## Installation
+
+The package is not published. Consumers install a packed tarball that they keep with their own code:
+run `npm run verify`, raise the version (`npm version <x.y.z> --no-git-tag-version`), run `npm pack`, copy
+`b2y-ai-service-<x.y.z>.tgz` into the consumer (for example `vendor/`) and depend on
+`"@b2y/ai-service": "file:vendor/b2y-ai-service-<x.y.z>.tgz"`. Always raise the version when repacking:
+npm caches tarballs by version and integrity.
+
+## Public API
+
+Only the root exports and the subpaths `text-to-sql/postgres`, `documents/pdf`, `documents/folder`,
+`conversations/folder`, `ui/react` and `ui/react/styles.css` are supported; everything else under `src/` is internal. `tests/unit/PublicApi.test.js` pins the list.
 
 ## Security controls
 
@@ -122,8 +329,9 @@ own read-only executor; check what it returns with `checkQueryResult`.
   schema and optional `postValidate` is accepted. Nothing is repaired or extracted. Every object in
   a task's output schema must be strict (`z.strictObject`, `additionalProperties: false`);
   `defineTask` refuses other schemas instead of changing them.
-- **No tools**: the request type has no tools field, tool-call responses are rejected, and task
-  definitions with unknown fields (such as `tools`) are refused.
+- **No model tool calls**: the request type has no tools field, tool-call responses are rejected, and
+  task definitions with unknown fields (such as `tools`) are refused. Package tools (`defineTool`) are
+  invoked by the consumer's code, are read-only, and their results are never sent to a model.
 - **Prompt injection**: data is JSON-encoded inside a single `<untrusted_data>` block with `<`, `>`
   and `&` escaped, and is never placed in the system prompt.
 - **No leakage**: errors created by the package carry codes, counts, HTTP status and schema-declared

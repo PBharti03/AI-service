@@ -154,8 +154,16 @@ export function createOpenAICompatibleProvider(config, dependencies = {}) {
       });
 
       if (!response.ok) {
-        await discardBody(response);
-        throw httpError(response.status);
+        // A 400 may be the server refusing the model's own output under constrained decoding
+        // (for example Groq's json_validate_failed): read only its error code, from a bounded body.
+        const rejectedOutput = response.status === 400 && (await structuredOutputRejected(response));
+        if (!rejectedOutput) await discardBody(response);
+        if (rejectedOutput) {
+          throw new AiServiceError(ErrorCodes.PROVIDER_OUTPUT_REJECTED, "The provider rejected the model output as invalid structured output", {
+            details: { status: 400, reason: "structured_output_rejected" },
+          });
+        }
+        throw httpError(response.status, response.headers);
       }
       const contentType = response.headers.get("content-type") ?? "";
       if (!contentType.toLowerCase().startsWith("application/json")) {
@@ -346,8 +354,33 @@ function isRedirectRejection(error) {
   return error instanceof Error && error.cause instanceof Error && error.cause.message === "unexpected redirect";
 }
 
-function httpError(status) {
-  const retryable = status === 408 || status === 429 || status >= 500;
+/** Longest wait a provider's Retry-After may ask for (seconds); larger values are capped. */
+const MAX_RETRY_AFTER_SECONDS = 300;
+
+/** Error codes by which OpenAI-compatible servers report model output that failed their JSON schema. */
+const OUTPUT_REJECTION_CODES = new Set(["json_validate_failed", "invalid_json_output"]);
+
+async function structuredOutputRejected(response) {
+  try {
+    const body = JSON.parse(await readLimitedText(response, 64 * 1024));
+    return typeof body?.error?.code === "string" && OUTPUT_REJECTION_CODES.has(body.error.code);
+  } catch {
+    return false;
+  }
+}
+
+function httpError(status, headers) {
+  if (status === 429) {
+    // Rate limited: its own code, with the provider's Retry-After (seconds, bounded) when it sends one.
+    const raw = headers?.get?.("retry-after");
+    const header = typeof raw === "string" && /^\s*\d+(\.\d+)?\s*$/.test(raw) ? Number(raw) : NaN;
+    const retryAfterSeconds = Number.isFinite(header) ? Math.min(MAX_RETRY_AFTER_SECONDS, Math.ceil(header)) : undefined;
+    return new AiServiceError(ErrorCodes.PROVIDER_RATE_LIMITED, "Provider rate limit reached (HTTP 429)", {
+      retryable: true,
+      details: { status, ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }) },
+    });
+  }
+  const retryable = status === 408 || status >= 500;
   const code = status === 503 ? ErrorCodes.PROVIDER_UNAVAILABLE : ErrorCodes.PROVIDER_HTTP_ERROR;
   return new AiServiceError(code, `Provider responded with HTTP ${String(status)}`, {
     retryable,

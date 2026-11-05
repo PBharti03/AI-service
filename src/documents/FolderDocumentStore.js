@@ -7,18 +7,25 @@ import { ErrorCodes } from "../errors/ErrorCodes.js";
 import { summarizeZodError } from "../validation/ZodIssues.js";
 import { buildSearchIndex } from "./DocumentSearch.js";
 
-/** Kinds of document an application can add. */
-export const DOCUMENT_TYPES = ["policy", "privacy", "terms", "faq", "questionnaire", "guide", "other"];
+/**
+ * Neutral kinds of document used when the consumer does not pass documentTypes. A consumer normally
+ * passes its own list (lower-case names, at most 20 characters each). Only addDocument checks it:
+ * documents stored earlier keep their type.
+ */
+export const DEFAULT_DOCUMENT_TYPES = Object.freeze(["document", "guide", "reference", "other"]);
+const DOCUMENT_TYPE = /^[a-z][a-z0-9_-]{0,19}$/;
 const APPLICATION_ID = /^[a-z][a-z0-9-]{0,63}$/;
 const DOCUMENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const MAX_DOCUMENTS = 200;
 
-const documentSchema = z.strictObject({
-  title: z.string().trim().min(1).max(120),
-  type: z.enum(DOCUMENT_TYPES),
-  text: z.string().trim().min(1).max(2_000_000),
-  fileName: z.string().trim().min(1).max(200).optional(),
-});
+function documentSchemaFor(documentTypes) {
+  return z.strictObject({
+    title: z.string().trim().min(1).max(120),
+    type: z.enum(documentTypes),
+    text: z.string().trim().min(1).max(2_000_000),
+    fileName: z.string().trim().min(1).max(200).optional(),
+  });
+}
 
 /**
  * @typedef {Object} DocumentStore
@@ -26,6 +33,7 @@ const documentSchema = z.strictObject({
  * @property {(applicationId: string, documentId: string) => Promise<boolean>} removeDocument
  * @property {(applicationId: string) => Promise<{ id: string, title: string, type: string, fileName?: string, addedAt?: string, passages: number }[]>} listDocuments
  * @property {(applicationId: string) => Promise<import("./DocumentSearch.js").SearchIndex | null>} loadIndex
+ * @property {readonly string[]} documentTypes - The kinds of document addDocument accepts.
  */
 
 /**
@@ -35,12 +43,26 @@ const documentSchema = z.strictObject({
  * Folders are created 0700 and files 0600; index writes are atomic. An application id is a plain
  * lower-case name, so it can never point outside its own folder. The store does not decide which
  * application a request belongs to: the document agent passes the trusted context's applicationId.
- * @param {{ root: string }} options
+ * A simple local store: one folder per application, no tenants. Multi-tenant consumers supply their own
+ * DocumentSource instead (see defineDocumentSource).
+ * @param {{ root: string, documentTypes?: readonly string[] }} options - documentTypes: the kinds addDocument
+ *   accepts (default DEFAULT_DOCUMENT_TYPES).
  * @returns {DocumentStore}
  */
-export function createFolderDocumentStore({ root }) {
+export function createFolderDocumentStore({ root, documentTypes = DEFAULT_DOCUMENT_TYPES }) {
   if (typeof root !== "string" || root.trim() === "")
     throw new AiServiceError(ErrorCodes.CONFIG_INVALID, "A documents root folder is required");
+  if (
+    !Array.isArray(documentTypes) ||
+    documentTypes.length === 0 ||
+    documentTypes.length > 50 ||
+    !documentTypes.every((type) => typeof type === "string" && DOCUMENT_TYPE.test(type)) ||
+    new Set(documentTypes).size !== documentTypes.length
+  ) {
+    throw new AiServiceError(ErrorCodes.CONFIG_INVALID, "documentTypes must be 1-50 unique lower-case names of up to 20 characters");
+  }
+  const types = Object.freeze([...documentTypes]);
+  const documentSchema = documentSchemaFor(types);
   const base = resolve(root);
   const cache = new Map();
 
@@ -143,5 +165,7 @@ export function createFolderDocumentStore({ root }) {
     listDocuments,
 
     loadIndex,
+
+    documentTypes: types,
   });
 }

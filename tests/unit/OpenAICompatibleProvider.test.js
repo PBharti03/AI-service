@@ -110,7 +110,7 @@ describe("OpenAI-compatible provider: failures", () => {
       [401, ErrorCodes.PROVIDER_HTTP_ERROR, false],
       [404, ErrorCodes.PROVIDER_HTTP_ERROR, false],
       [408, ErrorCodes.PROVIDER_HTTP_ERROR, true],
-      [429, ErrorCodes.PROVIDER_HTTP_ERROR, true],
+      [429, ErrorCodes.PROVIDER_RATE_LIMITED, true],
       [500, ErrorCodes.PROVIDER_HTTP_ERROR, true],
       [503, ErrorCodes.PROVIDER_UNAVAILABLE, true],
     ];

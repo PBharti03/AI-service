@@ -19,7 +19,7 @@ import { taskIdSchema } from "./TaskId.js";
  * @property {string} promptVersion - Bump when instructions or generation settings change, for evaluation tracking.
  * @property {string} description
  * @property {string} instructions
- * @property {string} dataLabel - Short label naming the data, for example "lead record".
+ * @property {string} dataLabel - Short label naming the data, for example "support ticket".
  * @property {TInput} inputSchema
  * @property {TOutput} outputSchema
  * @property {GenerationSettings} generation

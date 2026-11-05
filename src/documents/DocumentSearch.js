@@ -88,7 +88,7 @@ export function splitIntoPassages(text, { maxChars = 1200, overlapChars = 200 } 
  * @typedef {Object} IndexedDocument
  * @property {string} id
  * @property {string} title
- * @property {string} type - policy, privacy, terms, faq, questionnaire, guide or other.
+ * @property {string} type - The document's kind, as the consumer named it.
  * @property {string} text
  * @property {string} [fileName]
  * @property {string} [addedAt]
