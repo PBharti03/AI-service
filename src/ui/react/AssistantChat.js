@@ -1,5 +1,5 @@
 import { createElement as h, useCallback, useEffect, useRef, useState } from "react";
-import { ASSISTANT_NAME, ASSISTANT_PATHS, UI_LABELS } from "../../constants/Constants.js";
+import { ASSISTANT_NAME, ASSISTANT_PATHS, COMPACT_MEDIA_QUERY, PHONE_MEDIA_QUERY, UI_LABELS } from "../../constants/Constants.js";
 export { ASSISTANT_PATHS } from "../../constants/Constants.js";
 
 export { ASSISTANT_NAME };
@@ -38,6 +38,9 @@ const botIcon = (size) =>
     h("g", { className: "b2y-ai-bot-signal" }, ...botPaths(BOT.signal)),
   );
 const CLOSE = ["M18 6 6 18", "M6 6l12 12"];
+const PANEL = ["M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z", "M9 3v18"];
+const CHAT = ["M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2z"];
+const USER = ["M20 21a8 8 0 0 0-16 0", "M12 13a5 5 0 1 0 0-10 5 5 0 0 0 0 10z"];
 const SEND = ["M5 12h14", "M13 6l6 6-6 6"];
 const PLUS = ["M12 5v14", "M5 12h14"];
 const CLOCK = ["M12 7v5l3 2", "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z"];
@@ -235,8 +238,10 @@ export async function restoreConversation({ conversationId, loadConversation, li
  *   maxLength?: number, className?: string, style?: object,
  * }} props
  */
-export function AssistantChat({ send, loadConversation, listConversations, conversationId: initialConversationId, onConversationChange, title, intro, suggestions = [], labels: labelOverrides = {}, maxLength = 4000, className = "", style, onOpenLink, avatar }) {
+export function AssistantChat({ send, loadConversation, listConversations, conversationId: initialConversationId, onConversationChange, title, intro, suggestions = [], labels: labelOverrides = {}, maxLength = 4000, className = "", style, onOpenLink, avatar, variant = "panel" }) {
   const labels = { ...DEFAULT_LABELS, ...labelOverrides };
+  const page = variant === "page";
+  const [sidebarOpen, setSidebarOpen] = useState(() => !globalThis.matchMedia?.(PHONE_MEDIA_QUERY).matches);
   const [messages, setMessages] = useState([]);
   const [conversationId, setConversationId] = useState(initialConversationId || undefined);
   const [draft, setDraft] = useState("");
@@ -289,6 +294,27 @@ export function AssistantChat({ send, loadConversation, listConversations, conve
       cancelled = true;
     };
   }, [initialConversationId]);
+
+  // The chat list follows the screen: open on wider screens, a closed drawer on phones.
+  useEffect(() => {
+    const query = page ? globalThis.matchMedia?.(PHONE_MEDIA_QUERY) : null;
+    if (!query?.addEventListener) return undefined;
+    const sync = () => setSidebarOpen(!query.matches);
+    query.addEventListener("change", sync);
+    return () => query.removeEventListener("change", sync);
+  }, [page]);
+
+  useEffect(() => {
+    if (!page || recent !== null || restoring || !callbacks.current.listConversations) return undefined;
+    let active = true;
+    callbacks.current
+      .listConversations()
+      .then((rows) => active && setRecent(Array.isArray(rows) ? rows : []))
+      .catch(() => active && setRecent([]));
+    return () => {
+      active = false;
+    };
+  }, [page, recent, restoring]);
 
   useEffect(() => {
     const node = scrollRef.current;
@@ -378,11 +404,7 @@ export function AssistantChat({ send, loadConversation, listConversations, conve
       : null,
   );
 
-  return h(
-    "div",
-    { className: `b2y-ai-chat ${className}`.trim(), style },
-    header,
-    h(
+  const messageList = h(
       "div",
       { className: "b2y-ai-messages", ref: scrollRef, "aria-live": "polite", "aria-busy": sending || restoring },
       restoring ? h("div", { className: "b2y-ai-restoring" }, h(TypingIndicator, { label: labels.loading }), h("span", null, labels.loading)) : null,
@@ -398,15 +420,15 @@ export function AssistantChat({ send, loadConversation, listConversations, conve
         : null,
       ...messages.map((message, index) =>
         message.role === "user"
-          ? h("div", { key: index, className: "b2y-ai-row b2y-ai-row-user" }, h("p", { className: "b2y-ai-bubble-user" }, message.text))
+          ? h("div", { key: index, className: "b2y-ai-row b2y-ai-row-user" }, h("p", { className: "b2y-ai-bubble-user" }, message.text), page ? h("span", { className: "b2y-ai-user-avatar", "aria-hidden": "true" }, icon(USER, 16)) : null)
           : h("div", { key: index, className: "b2y-ai-row b2y-ai-row-assistant" }, h(Avatar, { avatar }), h("div", { className: "b2y-ai-bubble" }, h(AssistantMessage, { labels, onOpenLink, blocks: message.blocks?.length ? message.blocks : message.text ? [{ type: "paragraph", text: message.text }] : [] }))),
       ),
       sending ? h("div", { className: "b2y-ai-row b2y-ai-row-assistant" }, h(Avatar, { avatar }), h(TypingIndicator, { label: labels.typing })) : null,
       error
         ? h("div", { className: "b2y-ai-error", role: "alert" }, icon(ALERT, 16), h("span", null, error.message), h("button", { type: "button", onClick: () => ask(error.retryText, { retry: true }), disabled: sending }, labels.retry))
         : null,
-    ),
-    h(
+    );
+  const composer = h(
       "form",
       { className: "b2y-ai-composer", onSubmit: (event) => (event.preventDefault(), ask(draft)) },
       h(
@@ -430,6 +452,51 @@ export function AssistantChat({ send, loadConversation, listConversations, conve
         h("button", { type: "submit", className: "b2y-ai-send", disabled: sending || restoring || draft.trim() === "", "aria-label": labels.send, title: labels.send }, icon(SEND, 18)),
       ),
       h("p", { className: "b2y-ai-hint" }, labels.hint),
+    );
+
+  if (!page) return h("div", { className: `b2y-ai-chat ${className}`.trim(), style }, header, messageList, composer);
+
+  // Page layout: conversations sidebar (a drawer on phones), a title bar, the conversation and the composer.
+  const closeOnPhone = () => globalThis.matchMedia?.(PHONE_MEDIA_QUERY).matches && setSidebarOpen(false);
+  const currentTitle = (recent ?? []).find((row) => row.conversationId === conversationId)?.title || (messages.find((message) => message.role === "user")?.text ?? "").slice(0, 80) || title || labels.title;
+  const sidebar = h(
+    "aside",
+    { className: "b2y-ai-sidebar", "aria-label": labels.history },
+    h("button", { type: "button", className: "b2y-ai-new-chat", onClick: () => (newChat(), closeOnPhone()), disabled: sending }, icon(PLUS, 16), h("span", null, labels.newChat)),
+    listConversations && loadConversation ? h("p", { className: "b2y-ai-sidebar-label" }, labels.recent) : null,
+    listConversations && loadConversation
+      ? h(
+          "nav",
+          { className: "b2y-ai-conversations" },
+          recent === null ? h(TypingIndicator, { label: labels.loading }) : recent.length === 0 ? h("p", { className: "b2y-ai-muted" }, labels.noHistory) : null,
+          ...(recent ?? []).map((row) =>
+            h(
+              "button",
+              { key: row.conversationId, type: "button", title: row.title || labels.untitled, "aria-current": row.conversationId === conversationId ? "true" : undefined, className: row.conversationId === conversationId ? "b2y-ai-conversation b2y-ai-active" : "b2y-ai-conversation", onClick: () => (open(row.conversationId), closeOnPhone()), disabled: sending },
+              icon(CHAT, 15),
+              h("span", null, row.title || labels.untitled),
+            ),
+          ),
+        )
+      : null,
+  );
+  return h(
+    "div",
+    { className: `b2y-ai-chat b2y-ai-page${sidebarOpen ? " b2y-ai-sidebar-open" : ""} ${className}`.trim(), style },
+    sidebar,
+    sidebarOpen ? h("div", { className: "b2y-ai-scrim", "aria-hidden": "true", onClick: () => setSidebarOpen(false) }) : null,
+    h(
+      "section",
+      { className: "b2y-ai-main" },
+      h(
+        "div",
+        { className: "b2y-ai-page-header" },
+        h("button", { type: "button", className: "b2y-ai-icon-button", onClick: () => setSidebarOpen((value) => !value), "aria-label": labels.toggleSidebar, "aria-expanded": sidebarOpen, title: labels.toggleSidebar }, icon(PANEL, 18)),
+        h("span", { className: "b2y-ai-page-mark", "aria-hidden": "true" }, avatar ?? botIcon(20)),
+        h("strong", { className: "b2y-ai-page-title" }, currentTitle),
+      ),
+      messageList,
+      composer,
     ),
   );
 }
@@ -501,7 +568,7 @@ export function AssistantWidget({ client, onLaunch, hidden = false, launcherLabe
   const openLink = onOpenLink
     ? (link) => {
         onOpenLink(link);
-        if (globalThis.matchMedia?.("(max-width: 640px)").matches) setOpen(false);
+        if (globalThis.matchMedia?.(COMPACT_MEDIA_QUERY).matches) setOpen(false);
       }
     : undefined;
   return h(

@@ -1,6 +1,6 @@
 {
   "name": "@b2y/ai-service",
-  "version": "1.0.4",
+  "version": "1.0.7",
   "description": "Reusable, application-independent AI assistant for B2Y applications: consumer-supplied context, permissions and capabilities, routing to data, analytics, documents, research or advice, conversation history with retention, provider abstraction and a reusable chat UI.",
   "private": true,
   "license": "UNLICENSED",

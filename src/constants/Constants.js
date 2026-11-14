@@ -88,6 +88,11 @@ export const AI_MESSAGES = Object.freeze({
 
 // ── Chat UI ──────────────────────────────────────────────────────────────────
 
+/** Phone widths: the page layout's chat list becomes a drawer. Matches the page styles' breakpoint. */
+export const PHONE_MEDIA_QUERY = "(max-width: 767px)";
+/** Small screens: the floating widget's panel fills the screen. Matches the widget styles' breakpoint. */
+export const COMPACT_MEDIA_QUERY = "(max-width: 640px)";
+
 /** Default chat UI text; applications pass translated labels to override any of them. */
 export const UI_LABELS = Object.freeze({
   title: ASSISTANT_NAME,
@@ -106,6 +111,8 @@ export const UI_LABELS = Object.freeze({
   untitled: "Conversation",
   truncated: "Showing the first rows.",
   sources: "Sources",
+  recent: "Recent",
+  toggleSidebar: "Show or hide chats",
   launcher: `Ask ${ASSISTANT_NAME}`,
   close: "Close",
 });
