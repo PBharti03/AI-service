@@ -3,6 +3,10 @@ import { assertProfileMatchesContext, isApplicationProfile } from "../copilot/As
 import { parseTrustedContext } from "../core/Context.js";
 import { AiServiceError, ErrorCodes, summarizeZodError } from "../core/Errors.js";
 import { defineTask } from "../core/Tasks.js";
+import { MAX_PASSAGE_CHARS } from "../constants/Constants.js";
+import { DATA_CLASSIFICATION, DOCUMENT_ANSWER_TASK_ID } from "../constants/Enums.js";
+export { MAX_PASSAGE_CHARS } from "../constants/Constants.js";
+export { DOCUMENT_ANSWER_TASK_ID } from "../constants/Enums.js";
 
 /**
  * Generic document-store contract. The consumer owns storage, retrieval and authorization: it receives
@@ -14,7 +18,6 @@ import { defineTask } from "../core/Tasks.js";
  *   retrieve({ question, context, limit, signal })   the best passages for a question, at most `limit`
  */
 
-export const MAX_PASSAGE_CHARS = 1500;
 
 const passageSchema = z.strictObject({
   documentId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/),
@@ -302,7 +305,6 @@ export function searchIndex(index, question, { limit = 5, minCoverage = 0.5, k1 
   return hits.sort((a, b) => b.coverage - a.coverage || b.score - a.score).slice(0, limit);
 }
 
-export const DOCUMENT_ANSWER_TASK_ID = "documents.answer";
 const MAX_PASSAGES = 8;
 
 /**
@@ -364,7 +366,7 @@ export const DOCUMENT_ANSWER_TASK = defineTask({
   },
   generation: { temperature: 0, maxTokens: 1500 },
   // The application's own documents; the application's context decides the actual label.
-  maxClassification: "INTERNAL",
+  maxClassification: DATA_CLASSIFICATION.INTERNAL,
 });
 
 /**

@@ -10,6 +10,8 @@ closed.
 ## Layout
 
 ```
+src/constants     Constants.js (shared settings, provider and model, limits, messages, UI text) and
+                  Enums.js (fixed value sets: provider types, classifications, task ids, chart and SQL types)
 src/core          AiService (tasks, retries, rate limits, output validation), Context, Errors, Tasks
 src/providers     Groq and OpenAI-compatible providers, endpoint policy (internal)
 src/server        runtime, HTTP endpoints, rate limiter, read-only SQL runner (subpath ./server)

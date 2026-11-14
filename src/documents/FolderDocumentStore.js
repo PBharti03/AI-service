@@ -6,13 +6,9 @@ import { AiServiceError } from "../core/Errors.js";
 import { ErrorCodes } from "../core/Errors.js";
 import { summarizeZodError } from "../core/Errors.js";
 import { buildSearchIndex } from "./Documents.js";
+import { DEFAULT_DOCUMENT_TYPES } from "../constants/Enums.js";
+export { DEFAULT_DOCUMENT_TYPES } from "../constants/Enums.js";
 
-/**
- * Neutral kinds of document used when the consumer does not pass documentTypes. A consumer normally
- * passes its own list (lower-case names, at most 20 characters each). Only addDocument checks it:
- * documents stored earlier keep their type.
- */
-export const DEFAULT_DOCUMENT_TYPES = Object.freeze(["document", "guide", "reference", "other"]);
 const DOCUMENT_TYPE = /^[a-z][a-z0-9_-]{0,19}$/;
 const APPLICATION_ID = /^[a-z][a-z0-9-]{0,63}$/;
 const DOCUMENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;

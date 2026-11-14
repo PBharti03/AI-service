@@ -1,15 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { AiServiceError, ErrorCodes, summarizeZodError } from "./Errors.js";
+import { MAX_GRANTS } from "../constants/Constants.js";
+import { ACTOR_TYPE, ACTOR_TYPES, DATA_CLASSIFICATION, DATA_CLASSIFICATIONS } from "../constants/Enums.js";
+export { AI_ASSISTANT_PERMISSION, MAX_GRANTS } from "../constants/Constants.js";
+export { DATA_CLASSIFICATIONS } from "../constants/Enums.js";
 
 /** Dotted lowercase identifiers such as "ticket.summary". */
 export const taskIdSchema = z
   .string()
   .max(100)
   .regex(/^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)+$/);
-
-/** Ordered from least to most sensitive. */
-export const DATA_CLASSIFICATIONS = ["SYNTHETIC", "INTERNAL", "CONFIDENTIAL", "RESTRICTED"];
 
 export const dataClassificationSchema = z.enum(DATA_CLASSIFICATIONS);
 
@@ -26,7 +27,6 @@ export function classificationRank(classification) {
  * case and separators never decide access.
  */
 export const grantNameSchema = z.string().regex(/^[a-z0-9_]{1,80}(:[a-z0-9_]{1,80})?$/);
-export const MAX_GRANTS = 1000;
 
 const namePart = (value) =>
   String(value ?? "")
@@ -57,9 +57,6 @@ export function permissionKey(value) {
   const group = module === undefined || module === null ? "" : namePart(module);
   return group ? `${group}:${key}` : key;
 }
-
-/** The standard permission that lets a role use the AI assistant in any B2Y application. */
-export const AI_ASSISTANT_PERMISSION = "AI Assistant:Use AI Assistant";
 
 /** Normalized, de-duplicated keys of a role's permissions (rows or names), ready for context.permissions. */
 export function rolePermissions(values) {
@@ -102,7 +99,7 @@ export const trustedContextSchema = z.strictObject({
   applicationId: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
   tenantId: referenceSchema,
   actor: z.strictObject({
-    type: z.enum(["USER", "SYSTEM"]),
+    type: z.enum(ACTOR_TYPES),
     userId: referenceSchema,
   }),
   requestId: referenceSchema,
@@ -249,13 +246,13 @@ export function resolveTenantId({ requestTenantId, sessionTenantId }) {
  * @param {{ applicationId: string, requestTenantId?: unknown, sessionTenantId?: unknown, scope?: string, userId: unknown,
  *   permissions?: unknown[], features?: unknown[], tasks: readonly ({ id: string } | string)[], dataClassification?: string, requestId?: string }} options
  */
-export function buildTrustedContext({ applicationId, requestTenantId, sessionTenantId, scope, userId, permissions = [], features = [], tasks, dataClassification = "INTERNAL", requestId = randomUUID() }) {
+export function buildTrustedContext({ applicationId, requestTenantId, sessionTenantId, scope, userId, permissions = [], features = [], tasks, dataClassification = DATA_CLASSIFICATION.INTERNAL, requestId = randomUUID() }) {
   const tenantId = scope === undefined ? resolveTenantId({ requestTenantId, sessionTenantId }) : String(scope);
   if (userId === undefined || userId === null || String(userId) === "") throw new AiServiceError(ErrorCodes.CONTEXT_INVALID, "A signed-in user is required");
   return parseTrustedContext({
     applicationId,
     tenantId,
-    actor: { type: "USER", userId: String(userId) },
+    actor: { type: ACTOR_TYPE.USER, userId: String(userId) },
     requestId,
     permittedTasks: (tasks ?? []).map((task) => (typeof task === "string" ? task : task.id)),
     dataClassification,

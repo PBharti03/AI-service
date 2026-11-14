@@ -1,6 +1,10 @@
 import { z } from "zod";
 import { dataClassificationSchema } from "../core/Context.js";
 import { AiServiceError, createCancelledError, ErrorCodes, summarizeZodError, systemErrorCode } from "../core/Errors.js";
+import { APPROVED_PAID_HOSTS, DEFAULT_MAX_REQUEST_BYTES, DEFAULT_MAX_RESPONSE_BYTES, GROQ_BASE_URL, GROQ_DEFAULT_MODEL, GROQ_DEFAULT_TIMEOUT_MS } from "../constants/Constants.js";
+import { PROVIDER_TYPE, PROVIDER_TYPES } from "../constants/Enums.js";
+export { APPROVED_PAID_HOSTS, DEFAULT_MAX_REQUEST_BYTES, DEFAULT_MAX_RESPONSE_BYTES, GROQ_BASE_URL, GROQ_DEFAULT_MODEL, GROQ_DEFAULT_TIMEOUT_MS } from "../constants/Constants.js";
+export { PROVIDER_TYPE, PROVIDER_TYPES } from "../constants/Enums.js";
 
 // Types only: the contract every model backend implements (documented for editors via JSDoc).
 
@@ -86,9 +90,6 @@ export {};
  * @property {boolean} allowInsecurePrivateHttp - Permit plain HTTP to allow-listed private IPs and single-label hosts (for example "vllm" on a Docker network).
  * @property {readonly string[]} allowedHosts - Administrator-approved hosts for SELF_HOSTED providers. Every self-hosted host must be listed. Ignored for PAID.
  */
-
-/** The only external (PAID) endpoints the package will call: HTTPS on the default port, exact hostname. */
-export const APPROVED_PAID_HOSTS = Object.freeze(["api.groq.com"]);
 
 const HOSTNAME_PATTERN = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/;
 const IPV4_PATTERN = /^\d{1,3}(\.\d{1,3}){3}$/;
@@ -276,8 +277,6 @@ function configError(message, reason) {
  * @property {() => number} [now]
  */
 
-export const DEFAULT_MAX_REQUEST_BYTES = 256 * 1024;
-export const DEFAULT_MAX_RESPONSE_BYTES = 1024 * 1024;
 
 /**
  * Network failures worth retrying: the server was briefly unreachable or the
@@ -691,14 +690,6 @@ function mapUsage(usage) {
  * before any request is made. There is no default classification and no fallback provider.
  */
 
-export const GROQ_BASE_URL = "https://api.groq.com/openai/v1";
-export const GROQ_DEFAULT_TIMEOUT_MS = 60_000;
-/** Groq model used when an application names none; the package's tasks are tuned for it. */
-export const GROQ_DEFAULT_MODEL = "openai/gpt-oss-120b";
-/** Provider kinds the package can talk to. */
-export const PROVIDER_TYPE = Object.freeze({ GROQ: "groq", OPENAI_COMPATIBLE: "openai-compatible" });
-export const PROVIDER_TYPES = Object.freeze(Object.values(PROVIDER_TYPE));
-
 const apiKeySchema = z
   .string()
   .min(1)
@@ -710,7 +701,7 @@ const groqConfigSchema = z.strictObject({
   id: z
     .string()
     .regex(/^[a-z][a-z0-9-]{0,63}$/)
-    .default("groq"),
+    .default(PROVIDER_TYPE.GROQ),
   apiKey: apiKeySchema,
   model: z.string().min(1).max(200).default(GROQ_DEFAULT_MODEL),
   modelRevision: z.string().min(1).max(200).optional(),
@@ -771,6 +762,6 @@ export function createProvider(config, dependencies = {}) {
     throw new AiServiceError(ErrorCodes.CONFIG_INVALID, `Provider type must be one of: ${PROVIDER_TYPES.join(", ")}`);
   }
   const { type, ...rest } = config;
-  if (type === "groq") return createGroqProvider(rest, dependencies);
+  if (type === PROVIDER_TYPE.GROQ) return createGroqProvider(rest, dependencies);
   return createOpenAICompatibleProvider(rest, dependencies);
 }

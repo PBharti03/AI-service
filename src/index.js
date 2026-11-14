@@ -12,7 +12,8 @@ export { createTaskRegistry } from "./core/Tasks.js";
 export { DATA_CLASSIFICATIONS } from "./core/Context.js";
 export { parseTrustedContext } from "./core/Context.js";
 export { AI_ASSISTANT_PERMISSION, accessDenied, assertAuthorized, buildTrustedContext, hasFeature, hasPermission, permissionKey, resolveTenantId, rolePermissions } from "./core/Context.js";
-export { ASSISTANT_NAME } from "./core/Brand.js";
+export { ASSISTANT_NAME } from "./constants/Constants.js";
+export { ACTOR_TYPE, DATA_CLASSIFICATION, PROVIDER_TYPE, RESPONSE_STATUS } from "./constants/Enums.js";
 
 // ── Errors ────────────────────────────────────────────────────────────────────
 export { AiServiceError, errorCategory } from "./core/Errors.js";

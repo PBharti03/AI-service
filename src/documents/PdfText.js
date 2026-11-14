@@ -3,10 +3,9 @@
 import { extractText, getDocumentProxy } from "unpdf";
 import { AiServiceError } from "../core/Errors.js";
 import { ErrorCodes } from "../core/Errors.js";
+import { MAX_PDF_BYTES, MAX_PDF_PAGES, MAX_PDF_TEXT_CHARS } from "../constants/Constants.js";
+export { MAX_PDF_BYTES, MAX_PDF_PAGES, MAX_PDF_TEXT_CHARS } from "../constants/Constants.js";
 
-export const MAX_PDF_BYTES = 20 * 1024 * 1024;
-export const MAX_PDF_PAGES = 300;
-export const MAX_PDF_TEXT_CHARS = 2_000_000;
 
 /**
  * Extracts the text of a PDF, page by page (pages separated by a blank line). Scanned PDFs without a text

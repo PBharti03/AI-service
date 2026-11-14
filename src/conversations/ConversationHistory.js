@@ -4,15 +4,14 @@ import { parseTrustedContext } from "../core/Context.js";
 import { AiServiceError } from "../core/Errors.js";
 import { ErrorCodes } from "../core/Errors.js";
 import { responseBlocksSchema } from "../copilot/Capabilities.js";
+import { APP_DATA_MAX_BYTES, DEFAULT_RETENTION_DAYS, MAX_RETENTION_DAYS, MIN_RETENTION_DAYS } from "../constants/Constants.js";
+export { APP_DATA_MAX_BYTES, DEFAULT_RETENTION_DAYS, MAX_RETENTION_DAYS } from "../constants/Constants.js";
 
 /**
  * Conversation history scoped by the trusted context (application, tenant, user). Data-based answers are
  * never shown to the model again; no credentials, tokens or grants are stored.
  */
 
-export const DEFAULT_RETENTION_DAYS = 14;
-export const MAX_RETENTION_DAYS = 14;
-const MIN_RETENTION_DAYS = 7;
 const DAY_MS = 86_400_000;
 const CONVERSATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -32,7 +31,6 @@ export const conversationMessageSchema = z.strictObject({
   appData: z.json().optional(),
   createdAt: z.iso.datetime(),
 });
-export const APP_DATA_MAX_BYTES = 65_536;
 
 const STORE_METHODS = ["appendMessage", "listMessages", "listConversations", "deleteConversation", "deleteInactiveSince"];
 const stores = new WeakSet();

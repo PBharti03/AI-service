@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { CHART_TYPES } from "../constants/Enums.js";
+export { CHART_TYPES } from "../constants/Enums.js";
 
 /**
  * Turns a checked query result into a chart specification the UI can draw: when the shape fits (one label
@@ -9,8 +11,6 @@ import { z } from "zod";
 const MAX_POINTS = 36;
 const MAX_SERIES = 6;
 const MAX_PIE_SLICES = 8;
-/** Every chart type a spec may name. The UI can switch between the compatible ones without a new query. */
-export const CHART_TYPES = ["bar", "horizontal_bar", "stacked_bar", "line", "area", "pie", "doughnut"];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const ISO_DAY = /^(\d{4})-(\d{2})-(\d{2})(?:[T ]|$)/;
 

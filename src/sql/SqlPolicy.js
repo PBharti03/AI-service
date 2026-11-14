@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { AiServiceError, ErrorCodes, summarizeZodError } from "../core/Errors.js";
+import { SQL_AGGREGATE_FUNCTIONS, SQL_COLUMN_TYPES, SQL_DIALECTS, SQL_SAFE_FUNCTIONS, SQL_SAFE_WINDOW_FUNCTIONS } from "../constants/Enums.js";
+export { SQL_AGGREGATE_FUNCTIONS, SQL_COLUMN_TYPES, SQL_DIALECTS, SQL_SAFE_FUNCTIONS, SQL_SAFE_WINDOW_FUNCTIONS } from "../constants/Enums.js";
 
 /**
  * @typedef {Object} SqlColumnInfo
@@ -35,45 +37,6 @@ import { AiServiceError, ErrorCodes, summarizeZodError } from "../core/Errors.js
  * @property {number} maxAstNodes
  * @property {number} maxAstDepth
  */
-
-/** SQL dialects with a validator. Only PostgreSQL for now. */
-export const SQL_DIALECTS = ["postgres"];
-
-export const SQL_COLUMN_TYPES = ["text", "integer", "numeric", "boolean", "date", "timestamp", "timestamptz", "uuid"];
-
-/** Aggregate functions. count(*) is always allowed when count is. */
-export const SQL_AGGREGATE_FUNCTIONS = Object.freeze(["count", "sum", "avg", "min", "max"]);
-
-/**
- * Every function a policy may allow. It is a curated list of side-effect-free functions: an application
- * can narrow it (allowedFunctions) but never add to it, so a misconfigured policy cannot enable
- * pg_read_file, dblink, set_config or similar. Names are matched lower-case after parsing.
- */
-export const SQL_SAFE_FUNCTIONS = Object.freeze([
-  ...SQL_AGGREGATE_FUNCTIONS,
-  "round",
-  "floor",
-  "ceil",
-  "ceiling",
-  "abs",
-  "date_trunc",
-  "date_part",
-  "extract",
-  "to_char",
-  "make_date",
-  "make_interval",
-  "now",
-  "timezone",
-  "lower",
-  "upper",
-  "length",
-  "btrim",
-  "ltrim",
-  "rtrim",
-]);
-
-/** Window functions, usable only with allowWindowFunctions (aggregates may then also take OVER). */
-export const SQL_SAFE_WINDOW_FUNCTIONS = Object.freeze(["row_number", "rank", "dense_rank", "lag", "lead"]);
 
 /** Unquoted or quoted identifier as written in SQL (mixed case must be double-quoted in queries). */
 const identifierSchema = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,62}$/, "must be a plain SQL identifier");

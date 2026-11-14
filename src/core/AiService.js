@@ -3,11 +3,10 @@ import { z } from "zod";
 import { classificationRank, dataClassificationSchema, parseTrustedContext } from "./Context.js";
 import { AiServiceError, createCancelledError, ErrorCodes, rateLimitInfo, summarizeZodError, toAiServiceError } from "./Errors.js";
 import { createTaskRegistry, isRegisteredTask } from "./Tasks.js";
-import { createProvider, GROQ_DEFAULT_MODEL, PROVIDER_TYPE } from "../providers/Providers.js";
+import { createProvider } from "../providers/Providers.js";
+import { AI_PROVIDER_CONFIG, MAX_OUTPUT_CHARS, RATE_LIMIT_COOLDOWN_MAX_MS, RATE_LIMIT_COOLDOWN_UNKNOWN_MS } from "../constants/Constants.js";
+export { AI_PROVIDER_CONFIG, MAX_OUTPUT_CHARS } from "../constants/Constants.js";
 
-/** Longest the service refuses calls after a provider rate limit, and the wait without a Retry-After (ms). */
-const RATE_LIMIT_COOLDOWN_MAX_MS = 60_000;
-const RATE_LIMIT_COOLDOWN_UNKNOWN_MS = 5_000;
 
 /**
  * @typedef {Object} AiServiceOptions
@@ -416,7 +415,7 @@ export const noopLogger = Object.freeze({
  * @typedef {Object} UsageRecord
  * @property {string} applicationId
  * @property {string} tenantId
- * @property {"USER" | "SYSTEM"} actorType
+ * @property {"USER" | "SYSTEM"} actorType - an ACTOR_TYPE
  * @property {string} userId
  * @property {string} requestId
  * @property {string} taskId
@@ -439,7 +438,6 @@ export const EMPTY_TOKEN_USAGE = Object.freeze({
   totalTokens: null,
 });
 
-export const MAX_OUTPUT_CHARS = 100_000;
 
 /**
  * Fail-closed parsing of model output: only a complete ("stop") response
@@ -530,18 +528,6 @@ export function assertProviderAcceptsClassification(provider, actual) {
     });
   }
 }
-
-/**
- * The one place that chooses the AI provider and model for every B2Y application. Applications never name a
- * provider or model: to switch provider or model, change this configuration and release the package.
- */
-export const AI_PROVIDER_CONFIG = Object.freeze({
-  type: PROVIDER_TYPE.GROQ,
-  model: GROQ_DEFAULT_MODEL,
-  allowedClassifications: Object.freeze(["INTERNAL"]),
-  paid: true,
-  invalidOutputRetries: 1,
-});
 
 /**
  * An AiService on the platform's provider and model (AI_PROVIDER_CONFIG). Applications supply only their

@@ -5,8 +5,11 @@ import { EMPTY_TOKEN_USAGE, noopLogger } from "../core/AiService.js";
 import { assertAuthorized, checkRequirement, meetsRequirement } from "../core/Context.js";
 import { AiServiceError, errorCategory, ErrorCodes, summarizeZodError } from "../core/Errors.js";
 import { defineTask } from "../core/Tasks.js";
-import { ASSISTANT_NAME } from "../core/Brand.js";
+import { ASSISTANT_NAME } from "../constants/Constants.js";
 import { capabilityResultSchema, isCapability, isCapabilityGranted, responseBlocksSchema } from "./Capabilities.js";
+import { ASSISTANT_RESPOND_TASK_ID, ASSISTANT_ROUTE_TASK_ID, BUILT_IN_ROUTES, DATA_CLASSIFICATION } from "../constants/Enums.js";
+import { ASSISTANT_TIMEOUT_MS, MAX_MESSAGE_CHARS } from "../constants/Constants.js";
+export { ASSISTANT_RESPOND_TASK_ID, ASSISTANT_ROUTE_TASK_ID, BUILT_IN_ROUTES } from "../constants/Enums.js";
 
 /**
  * Who the assistant is speaking for. Each application that uses this package defines one profile in its
@@ -102,9 +105,6 @@ export function assertProfileMatchesContext(profile, context) {
 // The route and respond tasks of createAiAssistant: they see the profile, granted capabilities, the
 // question, model-safe history and shared facts only.
 
-export const ASSISTANT_ROUTE_TASK_ID = "assistant.route";
-export const ASSISTANT_RESPOND_TASK_ID = "assistant.respond";
-export const BUILT_IN_ROUTES = Object.freeze(["general", "unsupported"]);
 
 const applicationSchema = z.strictObject({
   name: z.string().min(1).max(60),
@@ -161,7 +161,7 @@ export const ASSISTANT_ROUTE_TASK = defineTask({
   }),
   // Reasoning models spend part of this budget thinking before they write the JSON: keep it generous.
   generation: { temperature: 0, maxTokens: 1500 },
-  maxClassification: "INTERNAL",
+  maxClassification: DATA_CLASSIFICATION.INTERNAL,
 });
 
 const answerBlockSchema = z.strictObject({
@@ -233,7 +233,7 @@ export const ASSISTANT_RESPOND_TASK = defineTask({
     return { ok: true };
   },
   generation: { temperature: 0.3, maxTokens: 2500 },
-  maxClassification: "INTERNAL",
+  maxClassification: DATA_CLASSIFICATION.INTERNAL,
 });
 
 /**
@@ -242,7 +242,6 @@ export const ASSISTANT_RESPOND_TASK = defineTask({
  * Capabilities may keep server-only memory between turns (for example earlier queries for follow-ups).
  */
 
-const MAX_MESSAGE_CHARS = 4000;
 const MEMORY_TURNS = 3;
 
 /** The capability's own memory from earlier turns: [{ message, memory }], oldest first. */
@@ -256,7 +255,6 @@ function capabilityMemory(earlier, capabilityId) {
   });
   return turns.slice(-MEMORY_TURNS);
 }
-const DEFAULT_TIMEOUT_MS = 60_000;
 
 const addCount = (a, b) => (a === null && b === null ? null : (a ?? 0) + (b ?? 0));
 const addUsage = (total, next) => ({
@@ -292,7 +290,7 @@ const mustPropagate = (error) => error instanceof AiServiceError && ["rate_limit
 /**
  * @param {{ ai: AiService, profile: ApplicationProfile, capabilities?: readonly object[], history?: object, timeoutMs?: number, logger?: object }} options
  */
-export function createAiAssistant({ ai, profile, capabilities = [], history, requires, timeoutMs = DEFAULT_TIMEOUT_MS, logger = noopLogger }) {
+export function createAiAssistant({ ai, profile, capabilities = [], history, requires, timeoutMs = ASSISTANT_TIMEOUT_MS, logger = noopLogger }) {
   if (typeof ai?.runTask !== "function" || !isApplicationProfile(profile)) {
     throw new AiServiceError(ErrorCodes.CONFIG_INVALID, "createAiAssistant needs an AiService and a profile from defineApplicationProfile()");
   }

@@ -3,6 +3,8 @@ import { chartSpecSchema } from "../analytics/Results.js";
 import { checkRequirement, meetsRequirement } from "../core/Context.js";
 import { AiServiceError, ErrorCodes, summarizeZodError } from "../core/Errors.js";
 import { defineTask } from "../core/Tasks.js";
+import { CAPABILITY_KINDS, DATA_CLASSIFICATION, SEARCH_FIELD_TYPES, SEARCH_FILTERS_TASK_ID } from "../constants/Enums.js";
+export { CAPABILITY_KINDS, SEARCH_FILTERS_TASK_ID } from "../constants/Enums.js";
 
 /**
  * The response format every assistant reply uses: a short list of blocks a UI can render without
@@ -118,8 +120,6 @@ export function analyticsReportToBlocks(report, { labels = {}, locale = "en-US" 
  * "Sales: 12,400 in Oct 2026 compared with 15,100 in Sep 2026 (-18%)". Never raw rows. Default: nothing.
  */
 
-// "content": generated output such as a flowchart (model-visible later, unlike data results).
-export const CAPABILITY_KINDS = Object.freeze(["data", "analytics", "search", "documents", "knowledge", "calculation", "content"]);
 const CAPABILITY_ID = /^[a-z][a-z0-9-]{0,63}$/;
 
 const definitionSchema = z.strictObject({
@@ -237,8 +237,6 @@ export function createDocumentsCapability({ id, title, description, examples, re
 
 // ── Search over a consumer's listing (products, properties, records) ─────────────────────────────
 
-export const SEARCH_FILTERS_TASK_ID = "search.filters";
-const SEARCH_FIELD_TYPES = ["text", "number", "boolean", "enum"];
 const OPERATORS = { text: ["contains", "eq"], number: ["eq", "lte", "gte"], boolean: ["eq"], enum: ["eq"] };
 const fieldName = z.string().regex(/^[a-z][a-z0-9_]{0,39}$/);
 const searchFieldSchema = z.strictObject({
@@ -284,7 +282,7 @@ export const SEARCH_FILTERS_TASK = defineTask({
     sort: z.string().max(40).nullable(),
   }),
   generation: { temperature: 0, maxTokens: 1200 },
-  maxClassification: "INTERNAL",
+  maxClassification: DATA_CLASSIFICATION.INTERNAL,
 });
 
 /** Keeps only filters on declared fields, with an operator and value valid for the field's type. */

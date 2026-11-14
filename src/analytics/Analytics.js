@@ -5,6 +5,10 @@ import { AiServiceError, ErrorCodes, summarizeZodError } from "../core/Errors.js
 import { defineTask } from "../core/Tasks.js";
 import { buildSchemaContext, checkQueryResult, describePolicyRules, isSqlPolicy, SQL_DIALECTS } from "../sql/SqlPolicy.js";
 import { buildResultChart, mergeSections, observeSection } from "./Results.js";
+import { ANALYTICS_PLAN_TASK_ID, CHART_HINTS, DATA_CLASSIFICATION } from "../constants/Enums.js";
+import { ANALYTICS_LIMITS, MAX_PLAN_CONVERSATION_TURNS, MAX_PLAN_QUERIES, MAX_QUESTION_CHARS } from "../constants/Constants.js";
+export { ANALYTICS_PLAN_TASK_ID, CHART_HINTS } from "../constants/Enums.js";
+export { ANALYTICS_LIMITS, MAX_PLAN_CONVERSATION_TURNS, MAX_PLAN_QUERIES, MAX_QUESTION_CHARS } from "../constants/Constants.js";
 
 /**
  * The application's description of its analytics, used to guide planning and to label results. It
@@ -68,13 +72,6 @@ export function isAnalyticsCatalog(value) {
   return typeof value === "object" && value !== null && catalogs.has(value);
 }
 
-export const ANALYTICS_PLAN_TASK_ID = "analytics.plan";
-export const MAX_QUESTION_CHARS = 2000;
-export const CHART_HINTS = ["none", "table", "bar", "horizontal_bar", "stacked_bar", "line", "area", "pie", "doughnut"];
-/** Independent queries one question may need. */
-export const MAX_PLAN_QUERIES = 4;
-/** Earlier analytics turns a follow-up may refer to. */
-export const MAX_PLAN_CONVERSATION_TURNS = 3;
 const MAX_SQL_CHARS = 20_000;
 const QUERY_ID = /^q[1-4]$/;
 /** A column alias the results of several queries can be lined up on (for example month). */
@@ -204,11 +201,8 @@ export const ANALYTICS_PLAN_TASK = defineTask({
   },
   generation: { temperature: 0, maxTokens: 2500 },
   // Schema metadata and business questions; the application's context decides the actual label.
-  maxClassification: "INTERNAL",
+  maxClassification: DATA_CLASSIFICATION.INTERNAL,
 });
-
-/** Upper bounds per question; an application may set lower ones, never higher. */
-export const ANALYTICS_LIMITS = Object.freeze({ maxQueries: MAX_PLAN_QUERIES, maxTotalRows: 600, timeoutMs: 15_000 });
 
 /** Why a planned query produced no section. Shown to the user; never contains values. */
 const FAILURE_REASONS = {

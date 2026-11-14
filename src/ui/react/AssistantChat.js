@@ -1,28 +1,12 @@
 import { createElement as h, useCallback, useEffect, useRef, useState } from "react";
-import { ASSISTANT_NAME } from "../../core/Brand.js";
+import { ASSISTANT_NAME, ASSISTANT_PATHS, UI_LABELS } from "../../constants/Constants.js";
+export { ASSISTANT_PATHS } from "../../constants/Constants.js";
 
 export { ASSISTANT_NAME };
 
 /** Reusable chat UI for createAiAssistant replies (React 18+); all text is rendered escaped. */
 
-const DEFAULT_LABELS = {
-  title: ASSISTANT_NAME,
-  greeting: "How can I help you today?",
-  subtitle: "Ask anything: questions about your data, advice or general topics.",
-  placeholder: "Ask a question",
-  send: "Send",
-  retry: "Try again",
-  newChat: "New chat",
-  history: "Recent chats",
-  noHistory: "No recent chats",
-  loading: "Loading your conversation",
-  error: "The assistant could not answer. Please try again.",
-  typing: `${ASSISTANT_NAME} is typing`,
-  hint: "Enter to send, Shift + Enter for a new line",
-  untitled: "Conversation",
-  truncated: "Showing the first rows.",
-  sources: "Sources",
-};
+const DEFAULT_LABELS = UI_LABELS;
 const SERIES_COLORS = ["var(--b2y-ai-accent, #4f46e5)", "#0f9d8a", "#e8590c", "#7048e8", "#d6336c", "#2b8a3e"];
 
 const formatValue = (value) => (typeof value === "number" ? value.toLocaleString(undefined, { maximumFractionDigits: 2 }) : value === null || value === undefined ? "–" : String(value));
@@ -450,9 +434,6 @@ export function AssistantChat({ send, loadConversation, listConversations, conve
   );
 }
 
-/** The assistant API paths every application serves (see mountAssistantRoutes on the server). */
-export const ASSISTANT_PATHS = Object.freeze({ status: "/ai/status", chat: "/ai/chat", conversations: "/ai/conversations" });
-
 /**
  * A client for the application's assistant API, in the B2Y response shape { status, message, data }.
  * headers() returns the application's own headers (sign-in token, tenant domain) for each request.
@@ -488,7 +469,7 @@ export function createAssistantClient({ baseUrl, headers = () => ({}), paths = {
  * @param {{ client: ReturnType<typeof createAssistantClient>, onLaunch?: () => void, hidden?: boolean, launcherLabel?: string, closeLabel?: string, avatar?: unknown,
  *   title?: string, intro?: string, suggestions?: string[], labels?: object, onOpenLink?: (link: string) => void, className?: string, style?: object }} props
  */
-export function AssistantWidget({ client, onLaunch, hidden = false, launcherLabel = `Ask ${ASSISTANT_NAME}`, closeLabel = "Close", avatar, className = "", style, onOpenLink, ...chat }) {
+export function AssistantWidget({ client, onLaunch, hidden = false, launcherLabel = UI_LABELS.launcher, closeLabel = UI_LABELS.close, avatar, className = "", style, onOpenLink, ...chat }) {
   const [enabled, setEnabled] = useState(false);
   const [open, setOpen] = useState(false);
   useEffect(() => {

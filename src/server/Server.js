@@ -4,21 +4,12 @@ import { createDefaultAiService } from "../core/AiService.js";
 import { aiUserMessage, AiServiceError, errorCategory, ErrorCategories, isRateLimited, rateLimitInfo } from "../core/Errors.js";
 import { createConversationHistory, scheduleConversationCleanup } from "../conversations/ConversationHistory.js";
 import { createFolderConversationStore } from "../conversations/FolderConversationStore.js";
+import { AI_MESSAGES, CONVERSATION_LIST_LIMIT, HTTP_STATUS, STATEMENT_TIMEOUT_MS } from "../constants/Constants.js";
+import { RESPONSE_STATUS } from "../constants/Enums.js";
+export { AI_MESSAGES } from "../constants/Constants.js";
+export { RESPONSE_STATUS } from "../constants/Enums.js";
 
-/** Messages the endpoints answer with; an application may override any of them (for example translated). */
-export const AI_MESSAGES = Object.freeze({
-  NOT_AVAILABLE: "The AI assistant is not available here.",
-  NOT_PERMITTED: "You do not have access to the AI assistant.",
-  MESSAGE_TOO_LONG: "Please write a shorter message.",
-  TOO_MANY_MESSAGES: "You're sending messages quickly. Please wait a moment and try again.",
-  NOT_ANSWERED: "The assistant could not answer this time. Please try again.",
-  ANSWERED: "Answer generated",
-});
 
-const HTTP = Object.freeze({ OK: 200, BAD_REQUEST: 400, FORBIDDEN: 403, NOT_FOUND: 404, TOO_MANY: 429, BAD_GATEWAY: 502 });
-export const RESPONSE_STATUS = Object.freeze({ SUCCESS: "SUCCESS", FAILURE: "FAILURE" });
-const STATEMENT_TIMEOUT_MS = 5000;
-const CONVERSATION_LIST_LIMIT = 20;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const noop = () => {};
 const quietLogger = Object.freeze({ info: noop, warn: noop, error: noop });
@@ -107,16 +98,16 @@ export function createAssistantEndpoints({ resolve, limiter, logger = quietLogge
   const fail = (res, error, what) => {
     if (isRateLimited(error)) {
       logger.warn(`${what} rate limited`, rateLimitInfo(error));
-      return respond(res, HTTP.TOO_MANY, false, aiUserMessage(error), { rateLimited: true });
+      return respond(res, HTTP_STATUS.TOO_MANY, false, aiUserMessage(error), { rateLimited: true });
     }
     const category = error instanceof AiServiceError ? errorCategory(error) : null;
     if (category === ErrorCategories.NOT_AUTHORIZED) {
       logger.warn(`${what} refused`, { code: error.code });
-      return respond(res, HTTP.FORBIDDEN, false, text.NOT_PERMITTED);
+      return respond(res, HTTP_STATUS.FORBIDDEN, false, text.NOT_PERMITTED);
     }
-    if (category === ErrorCategories.INPUT_INVALID) return respond(res, HTTP.BAD_REQUEST, false, text.MESSAGE_TOO_LONG);
+    if (category === ErrorCategories.INPUT_INVALID) return respond(res, HTTP_STATUS.BAD_REQUEST, false, text.MESSAGE_TOO_LONG);
     logger.warn(`${what} failed`, { code: error?.code || error?.name });
-    return respond(res, HTTP.BAD_GATEWAY, false, text.NOT_ANSWERED);
+    return respond(res, HTTP_STATUS.BAD_GATEWAY, false, text.NOT_ANSWERED);
   };
   const handle = (what, run) => async (req, res) => {
     try {
@@ -127,25 +118,25 @@ export function createAssistantEndpoints({ resolve, limiter, logger = quietLogge
   };
   return Object.freeze({
     /** Whether the assistant is available to this user (the UI shows it only then). */
-    status: handle("AI status", async (req, res) => respond(res, HTTP.OK, true, null, { enabled: Boolean(await resolve(req).catch(() => null)) })),
+    status: handle("AI status", async (req, res) => respond(res, HTTP_STATUS.OK, true, null, { enabled: Boolean(await resolve(req).catch(() => null)) })),
     chat: handle("AI chat", async (req, res) => {
       const ready = await resolve(req);
-      if (!ready) return respond(res, HTTP.NOT_FOUND, false, text.NOT_AVAILABLE);
+      if (!ready) return respond(res, HTTP_STATUS.NOT_FOUND, false, text.NOT_AVAILABLE);
       const allowed = limiter ? limiter.take({ tenantId: ready.context.tenantId, userId: ready.context.actor.userId }) : { ok: true };
-      if (!allowed.ok) return respond(res, HTTP.TOO_MANY, false, text.TOO_MANY_MESSAGES, { rateLimited: true, retryAfterSeconds: allowed.retryAfterSeconds });
+      if (!allowed.ok) return respond(res, HTTP_STATUS.TOO_MANY, false, text.TOO_MANY_MESSAGES, { rateLimited: true, retryAfterSeconds: allowed.retryAfterSeconds });
       const reply = await ready.assistant.reply({ message: req.body?.message, context: ready.context, conversationId: req.body?.conversationId });
       logger.info("AI chat answered", { route: reply.route, status: reply.status, blocks: reply.blocks.length });
-      return respond(res, HTTP.OK, true, text.ANSWERED, { conversationId: reply.conversationId, status: reply.status, blocks: reply.blocks });
+      return respond(res, HTTP_STATUS.OK, true, text.ANSWERED, { conversationId: reply.conversationId, status: reply.status, blocks: reply.blocks });
     }),
     listConversations: handle("AI conversations", async (req, res) => {
       const ready = await resolve(req);
       const conversations = ready?.assistant.hasHistory ? await ready.assistant.listConversations({ context: ready.context, limit: CONVERSATION_LIST_LIMIT }) : [];
-      return respond(res, HTTP.OK, true, null, { conversations });
+      return respond(res, HTTP_STATUS.OK, true, null, { conversations });
     }),
     getConversation: handle("AI conversation", async (req, res) => {
       const ready = await resolve(req);
       const messages = ready?.assistant.hasHistory ? await ready.assistant.loadConversation({ context: ready.context, conversationId: req.params?.id }) : [];
-      return respond(res, HTTP.OK, true, null, { messages });
+      return respond(res, HTTP_STATUS.OK, true, null, { messages });
     }),
   });
 }

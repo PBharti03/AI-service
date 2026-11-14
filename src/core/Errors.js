@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { AI_BUSY_MESSAGE } from "../constants/Constants.js";
+export { AI_BUSY_MESSAGE } from "../constants/Constants.js";
 
 /** Every code an AiServiceError can carry. */
 export const ErrorCodes = {
@@ -178,9 +180,6 @@ function toSafeCause(cause) {
 export function errorCategory(error) {
   return error instanceof AiServiceError && Object.hasOwn(ErrorCategories, error.code) ? ErrorCategories[error.code] : "internal";
 }
-
-/** Shown to users on a rate limit; the provider's wait belongs in logs (rateLimitInfo). */
-export const AI_BUSY_MESSAGE = "AI is temporarily busy. Please try again shortly.";
 
 export function isRateLimited(error) {
   return error instanceof AiServiceError && error.code === ErrorCodes.PROVIDER_RATE_LIMITED;
