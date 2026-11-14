@@ -3,7 +3,7 @@
 // tests/unit/PublicApi.test.js pins this list so nothing becomes public by accident.
 
 // ── Core: tasks, the AI service and its configuration ─────────────────────────
-export { createAiService } from "./core/AiService.js";
+export { AI_PROVIDER_CONFIG, createAiService, createDefaultAiService } from "./core/AiService.js";
 export { noopLogger } from "./core/AiService.js";
 export { defineTask } from "./core/Tasks.js";
 export { createTaskRegistry } from "./core/Tasks.js";
@@ -11,21 +11,15 @@ export { createTaskRegistry } from "./core/Tasks.js";
 // ── Application context (supplied by the consumer) and authorization checks ───
 export { DATA_CLASSIFICATIONS } from "./core/Context.js";
 export { parseTrustedContext } from "./core/Context.js";
-export { assertAuthorized, hasFeature, hasPermission } from "./core/Context.js";
+export { AI_ASSISTANT_PERMISSION, accessDenied, assertAuthorized, buildTrustedContext, hasFeature, hasPermission, permissionKey, resolveTenantId, rolePermissions } from "./core/Context.js";
+export { ASSISTANT_NAME } from "./core/Brand.js";
 
 // ── Errors ────────────────────────────────────────────────────────────────────
 export { AiServiceError, errorCategory } from "./core/Errors.js";
 export { ErrorCategories, ErrorCodes } from "./core/Errors.js";
 export { AI_BUSY_MESSAGE, aiUserMessage, isRateLimited, rateLimitInfo } from "./core/Errors.js";
 
-// ── Providers (all behind the ChatProvider interface) ─────────────────────────
-export { createGroqProvider, createProvider, GROQ_BASE_URL, GROQ_DEFAULT_MODEL, PROVIDER_TYPES } from "./providers/Providers.js";
-export {
-  createOpenAICompatibleProvider,
-  DEFAULT_MAX_REQUEST_BYTES,
-  DEFAULT_MAX_RESPONSE_BYTES,
-} from "./providers/Providers.js";
-export { APPROVED_PAID_HOSTS } from "./providers/Providers.js";
+// Providers are internal: AI_PROVIDER_CONFIG (core/AiService.js) is the one place that picks provider and model.
 
 // ── SQL policy and validation (dialect validators: "@b2y/ai-service/text-to-sql/postgres") ──
 export {
@@ -65,6 +59,7 @@ export { createDocumentQaAgent, DOCUMENT_ANSWER_TASK, DOCUMENT_ANSWER_TASK_ID } 
 // ── Assistant (copilot): capabilities, routing and answers ──
 export { createAiAssistant } from "./copilot/Assistant.js";
 export { CAPABILITY_KINDS, createAnalyticsCapability, createDocumentsCapability, defineCapability, isCapability } from "./copilot/Capabilities.js";
+export { createSearchCapability, SEARCH_FILTERS_TASK, SEARCH_FILTERS_TASK_ID } from "./copilot/Capabilities.js";
 export { ASSISTANT_RESPOND_TASK, ASSISTANT_RESPOND_TASK_ID, ASSISTANT_ROUTE_TASK, ASSISTANT_ROUTE_TASK_ID } from "./copilot/Assistant.js";
 export { analyticsReportToBlocks, responseBlocksSchema } from "./copilot/Capabilities.js";
 

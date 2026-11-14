@@ -1,9 +1,13 @@
 import { createElement as h, useCallback, useEffect, useRef, useState } from "react";
+import { ASSISTANT_NAME } from "../../core/Brand.js";
+
+export { ASSISTANT_NAME };
 
 /** Reusable chat UI for createAiAssistant replies (React 18+); all text is rendered escaped. */
 
 const DEFAULT_LABELS = {
-  title: "AI Assistant",
+  title: ASSISTANT_NAME,
+  greeting: "How can I help you today?",
   subtitle: "Ask anything: questions about your data, advice or general topics.",
   placeholder: "Ask a question",
   send: "Send",
@@ -13,7 +17,7 @@ const DEFAULT_LABELS = {
   noHistory: "No recent chats",
   loading: "Loading your conversation",
   error: "The assistant could not answer. Please try again.",
-  typing: "Assistant is typing",
+  typing: `${ASSISTANT_NAME} is typing`,
   hint: "Enter to send, Shift + Enter for a new line",
   untitled: "Conversation",
   truncated: "Showing the first rows.",
@@ -29,13 +33,34 @@ const formatDate = (iso) => {
 const toViewMessages = (loaded) => (Array.isArray(loaded) ? loaded : []).filter((message) => message && (message.role === "user" || message.role === "assistant")).map((message) => ({ role: message.role, text: String(message.text ?? ""), blocks: Array.isArray(message.blocks) ? message.blocks : [] }));
 
 const icon = (paths, size = 16) => h("svg", { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true", focusable: "false" }, ...paths.map((d, index) => h("path", { key: index, d })));
-const SPARK = ["M12 3l1.9 4.6L18.5 9.5l-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9z", "M19 15l.8 1.9 1.9.8-1.9.8L19 20.5l-.8-1.9-1.9-.8 1.9-.8z"];
+/**
+ * Beya's icon, the same in every application: a friendly line-style bot (outline in the text colour, teal
+ * antenna, ears and signal). Parts are grouped so the launcher can animate them (tilt, blink, signal pulse).
+ */
+const BOT = Object.freeze({
+  outline: ["M8.5 8.2h7a3 3 0 0 1 3 3v2a3 3 0 0 1-3 3h-7a3 3 0 0 1-3-3v-2a3 3 0 0 1 3-3z", "M6.6 21.6a5.4 3.9 0 0 1 10.8 0z"],
+  eyes: ["M10 11.4v1.6", "M14 11.4v1.6"],
+  accent: ["M12 6.7v1.5", "M3.9 12.2h1.6", "M18.5 12.2h1.6"],
+  signal: ["M9.3 3.7a3.8 3.8 0 0 1 5.4 0", "M10.9 5.3a1.6 1.6 0 0 1 2.2 0"],
+});
+const botPaths = (paths) => paths.map((d, index) => h("path", { key: index, d }));
+const botIcon = (size) =>
+  h(
+    "svg",
+    { className: "b2y-ai-bot", width: size, height: size, viewBox: "0 0 24 24", fill: "none", strokeWidth: 1.7, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true", focusable: "false" },
+    h("g", { stroke: "currentColor" }, ...botPaths(BOT.outline)),
+    h("g", { className: "b2y-ai-bot-eyes", stroke: "currentColor" }, ...botPaths(BOT.eyes)),
+    h("g", { className: "b2y-ai-bot-accent" }, ...botPaths(BOT.accent)),
+    h("g", { className: "b2y-ai-bot-signal" }, ...botPaths(BOT.signal)),
+  );
+const CLOSE = ["M18 6 6 18", "M6 6l12 12"];
 const SEND = ["M5 12h14", "M13 6l6 6-6 6"];
 const PLUS = ["M12 5v14", "M5 12h14"];
 const CLOCK = ["M12 7v5l3 2", "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z"];
 const ALERT = ["M12 9v4", "M12 17h.01", "M10.3 3.9L2.4 18a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"];
 
-const Avatar = () => h("span", { className: "b2y-ai-avatar", "aria-hidden": "true" }, icon(SPARK, 15));
+/** The assistant's picture: Beya's bot in every application unless one passes its own avatar. */
+const Avatar = ({ avatar }) => h("span", { className: "b2y-ai-avatar", "aria-hidden": "true" }, avatar ?? botIcon(22));
 
 /** Three animated dots while the assistant is working. */
 export function TypingIndicator({ label = DEFAULT_LABELS.typing }) {
@@ -46,7 +71,7 @@ function Chart({ spec }) {
   if (!spec || !Array.isArray(spec.xLabels) || !Array.isArray(spec.series) || spec.xLabels.length < 2) return null;
   const width = 560;
   const height = 200;
-  const pad = { left: 44, right: 8, top: 8, bottom: 28 };
+  const pad = { left: 44, right: 8, top: 18, bottom: 28 };
   const values = spec.series.flatMap((series) => series.values);
   const max = Math.max(1, ...values);
   const innerW = width - pad.left - pad.right;
@@ -61,17 +86,22 @@ function Chart({ spec }) {
     h("line", { key: "mid", x1: pad.left, y1: pad.top + innerH / 2, x2: width - pad.right, y2: pad.top + innerH / 2, className: "b2y-ai-grid" }),
     h("line", { key: "axis", x1: pad.left, y1: pad.top + innerH, x2: width - pad.right, y2: pad.top + innerH, className: "b2y-ai-axis" }),
     h("text", { key: "max", x: pad.left - 6, y: pad.top + 4, textAnchor: "end", className: "b2y-ai-tick" }, formatValue(max)),
+    h("text", { key: "half", x: pad.left - 6, y: pad.top + innerH / 2 + 4, textAnchor: "end", className: "b2y-ai-tick" }, formatValue(Math.round(max / 2))),
     ...spec.xLabels.map((label, index) => (index % every === 0 ? h("text", { key: `x${index}`, x: isLine ? x(index) : pad.left + ((index + 0.5) * innerW) / n, y: height - 8, textAnchor: "middle", className: "b2y-ai-tick" }, String(label).slice(0, 12)) : null)),
   ];
   spec.series.forEach((series, seriesIndex) => {
     const color = SERIES_COLORS[seriesIndex % SERIES_COLORS.length];
     if (isLine) {
       children.push(h("polyline", { key: `s${seriesIndex}`, fill: "none", stroke: color, strokeWidth: 2.25, strokeLinejoin: "round", strokeLinecap: "round", points: series.values.map((value, index) => `${x(index)},${y(value)}`).join(" ") }));
+      if (n <= 24) series.values.forEach((value, index) => children.push(h("circle", { key: `p${seriesIndex}-${index}`, cx: x(index), cy: y(value), r: 3, fill: "#fff", stroke: color, strokeWidth: 2 })));
     } else {
       const slot = innerW / n;
       const barW = Math.max(2, (slot * 0.7) / spec.series.length);
       series.values.forEach((value, index) => {
-        children.push(h("rect", { key: `b${seriesIndex}-${index}`, x: pad.left + index * slot + slot * 0.15 + seriesIndex * barW, y: y(value), width: barW, height: Math.max(0, pad.top + innerH - y(value)), fill: color, rx: 3 }));
+        const barX = pad.left + index * slot + slot * 0.15 + seriesIndex * barW;
+        children.push(h("rect", { key: `b${seriesIndex}-${index}`, x: barX, y: y(value), width: barW, height: Math.max(0, pad.top + innerH - y(value)), fill: color, rx: 4 }));
+        // Values above the bars when there is room for them.
+        if (spec.series.length === 1 && n <= 12) children.push(h("text", { key: `v${index}`, x: barX + barW / 2, y: y(value) - 5, textAnchor: "middle", className: "b2y-ai-value" }, formatValue(value)));
       });
     }
   });
@@ -107,7 +137,42 @@ function Flow({ block }) {
   );
 }
 
-function Block({ block, labels }) {
+/** Item cards (products, listings). Links open through onOpenLink when given (in-app navigation). */
+function Cards({ block, onOpenLink }) {
+  return h(
+    "div",
+    { className: "b2y-ai-cards-block" },
+    block.title ? h("p", { className: "b2y-ai-cards-title" }, block.title) : null,
+    h(
+      "div",
+      { className: "b2y-ai-cards" },
+      ...block.items.map((item, index) => {
+        const body = [
+          item.image ? h("div", { key: "img", className: "b2y-ai-item-image" }, h("img", { src: item.image, alt: "", loading: "lazy", referrerPolicy: "no-referrer" })) : h("div", { key: "img", className: "b2y-ai-item-image b2y-ai-item-image-empty" }, item.title.slice(0, 1).toUpperCase()),
+          item.badge ? h("span", { key: "badge", className: "b2y-ai-item-badge" }, item.badge) : null,
+          h("span", { key: "title", className: "b2y-ai-item-title" }, item.title),
+          item.subtitle ? h("span", { key: "sub", className: "b2y-ai-item-subtitle" }, item.subtitle) : null,
+          item.price ? h("span", { key: "price", className: "b2y-ai-item-price" }, item.price, item.oldPrice ? h("s", null, item.oldPrice) : null) : null,
+        ];
+        if (!item.link) return h("div", { key: index, className: "b2y-ai-item" }, ...body);
+        const external = item.link.startsWith("https://");
+        return h(
+          "a",
+          {
+            key: index,
+            className: "b2y-ai-item",
+            href: item.link,
+            ...(external ? { target: "_blank", rel: "noopener noreferrer" } : {}),
+            onClick: onOpenLink && !external ? (event) => { if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return; event.preventDefault(); onOpenLink(item.link); } : undefined,
+          },
+          ...body,
+        );
+      }),
+    ),
+  );
+}
+
+function Block({ block, labels, onOpenLink }) {
   switch (block.type) {
     case "heading":
       return h("h4", { className: "b2y-ai-heading" }, block.text);
@@ -117,23 +182,27 @@ function Block({ block, labels }) {
       return h("ul", { className: "b2y-ai-bullets" }, ...block.items.map((item, index) => h("li", { key: index }, item)));
     case "metrics":
       return h("div", { className: "b2y-ai-metrics" }, ...block.items.map((item, index) => h("div", { key: index, className: "b2y-ai-metric" }, h("span", { className: "b2y-ai-metric-label" }, item.label), h("span", { className: "b2y-ai-metric-value" }, item.value))));
-    case "table":
+    case "table": {
+      const numeric = block.columns.map((_, index) => block.rows.some((row) => typeof row[index] === "number"));
       return h(
         "div",
         { className: "b2y-ai-card b2y-ai-table-card" },
         h(
           "div",
           { className: "b2y-ai-table-wrap" },
-          h("table", { className: "b2y-ai-table" }, h("thead", null, h("tr", null, ...block.columns.map((column, index) => h("th", { key: index }, column)))), h("tbody", null, ...block.rows.map((row, rowIndex) => h("tr", { key: rowIndex }, ...row.map((cell, cellIndex) => h("td", { key: cellIndex, className: typeof cell === "number" ? "b2y-ai-num" : undefined }, formatValue(cell))))))),
+          h("table", { className: "b2y-ai-table" }, h("thead", null, h("tr", null, ...block.columns.map((column, index) => h("th", { key: index, className: numeric[index] ? "b2y-ai-num" : undefined }, column)))), h("tbody", null, ...block.rows.map((row, rowIndex) => h("tr", { key: rowIndex }, ...row.map((cell, cellIndex) => h("td", { key: cellIndex, className: typeof cell === "number" ? "b2y-ai-num" : undefined }, formatValue(cell))))))),
         ),
         block.truncated ? h("p", { className: "b2y-ai-muted" }, labels.truncated) : null,
       );
+    }
     case "chart":
       return h(Chart, { spec: block.spec });
     case "notice":
       return h("div", { className: `b2y-ai-notice b2y-ai-notice-${block.tone}` }, block.title ? h("strong", null, block.title) : null, h("ul", null, ...block.items.map((item, index) => h("li", { key: index }, item))));
     case "flow":
       return h(Flow, { block });
+    case "cards":
+      return h(Cards, { block, onOpenLink });
     case "sources":
       return h("div", { className: "b2y-ai-sources" }, h("span", null, `${labels.sources}:`), ...block.items.map((item, index) => (item.url ? h("a", { key: index, href: item.url, target: "_blank", rel: "noopener noreferrer" }, item.title) : h("span", { key: index }, item.title))));
     default:
@@ -142,9 +211,9 @@ function Block({ block, labels }) {
 }
 
 /** One assistant reply rendered from its blocks. */
-export function AssistantMessage({ blocks = [], labels: labelOverrides = {} }) {
+export function AssistantMessage({ blocks = [], labels: labelOverrides = {}, onOpenLink }) {
   const labels = { ...DEFAULT_LABELS, ...labelOverrides };
-  return h("div", { className: "b2y-ai-answer" }, ...blocks.map((block, index) => h(Block, { key: index, block, labels })));
+  return h("div", { className: "b2y-ai-answer" }, ...blocks.map((block, index) => h(Block, { key: index, block, labels, onOpenLink })));
 }
 
 /**
@@ -182,7 +251,7 @@ export async function restoreConversation({ conversationId, loadConversation, li
  *   maxLength?: number, className?: string, style?: object,
  * }} props
  */
-export function AssistantChat({ send, loadConversation, listConversations, conversationId: initialConversationId, onConversationChange, title, intro, suggestions = [], labels: labelOverrides = {}, maxLength = 4000, className = "", style }) {
+export function AssistantChat({ send, loadConversation, listConversations, conversationId: initialConversationId, onConversationChange, title, intro, suggestions = [], labels: labelOverrides = {}, maxLength = 4000, className = "", style, onOpenLink, avatar }) {
   const labels = { ...DEFAULT_LABELS, ...labelOverrides };
   const [messages, setMessages] = useState([]);
   const [conversationId, setConversationId] = useState(initialConversationId || undefined);
@@ -301,7 +370,7 @@ export function AssistantChat({ send, loadConversation, listConversations, conve
   const header = h(
     "div",
     { className: "b2y-ai-header" },
-    h("div", { className: "b2y-ai-title" }, h(Avatar), h("div", null, h("strong", null, title ?? labels.title), h("span", null, labels.subtitle))),
+    h("div", { className: "b2y-ai-title" }, h(Avatar, { avatar }), h("div", null, h("strong", null, title ?? labels.title), h("span", null, labels.subtitle))),
     h(
       "div",
       { className: "b2y-ai-actions" },
@@ -337,7 +406,8 @@ export function AssistantChat({ send, loadConversation, listConversations, conve
         ? h(
             "div",
             { className: "b2y-ai-empty" },
-            h("span", { className: "b2y-ai-empty-icon", "aria-hidden": "true" }, icon(SPARK, 26)),
+            h("span", { className: "b2y-ai-empty-icon", "aria-hidden": "true" }, avatar ?? botIcon(34)),
+            h("h3", { className: "b2y-ai-greeting" }, labels.greeting),
             intro ? h("p", { className: "b2y-ai-intro" }, intro) : null,
             suggestions.length > 0 ? h("div", { className: "b2y-ai-suggestions" }, ...suggestions.map((suggestion) => h("button", { key: suggestion, type: "button", onClick: () => ask(suggestion) }, suggestion))) : null,
           )
@@ -345,9 +415,9 @@ export function AssistantChat({ send, loadConversation, listConversations, conve
       ...messages.map((message, index) =>
         message.role === "user"
           ? h("div", { key: index, className: "b2y-ai-row b2y-ai-row-user" }, h("p", { className: "b2y-ai-bubble-user" }, message.text))
-          : h("div", { key: index, className: "b2y-ai-row b2y-ai-row-assistant" }, h(Avatar), h("div", { className: "b2y-ai-bubble" }, h(AssistantMessage, { labels, blocks: message.blocks?.length ? message.blocks : message.text ? [{ type: "paragraph", text: message.text }] : [] }))),
+          : h("div", { key: index, className: "b2y-ai-row b2y-ai-row-assistant" }, h(Avatar, { avatar }), h("div", { className: "b2y-ai-bubble" }, h(AssistantMessage, { labels, onOpenLink, blocks: message.blocks?.length ? message.blocks : message.text ? [{ type: "paragraph", text: message.text }] : [] }))),
       ),
-      sending ? h("div", { className: "b2y-ai-row b2y-ai-row-assistant" }, h(Avatar), h(TypingIndicator, { label: labels.typing })) : null,
+      sending ? h("div", { className: "b2y-ai-row b2y-ai-row-assistant" }, h(Avatar, { avatar }), h(TypingIndicator, { label: labels.typing })) : null,
       error
         ? h("div", { className: "b2y-ai-error", role: "alert" }, icon(ALERT, 16), h("span", null, error.message), h("button", { type: "button", onClick: () => ask(error.retryText, { retry: true }), disabled: sending }, labels.retry))
         : null,
@@ -376,6 +446,99 @@ export function AssistantChat({ send, loadConversation, listConversations, conve
         h("button", { type: "submit", className: "b2y-ai-send", disabled: sending || restoring || draft.trim() === "", "aria-label": labels.send, title: labels.send }, icon(SEND, 18)),
       ),
       h("p", { className: "b2y-ai-hint" }, labels.hint),
+    ),
+  );
+}
+
+/** The assistant API paths every application serves (see mountAssistantRoutes on the server). */
+export const ASSISTANT_PATHS = Object.freeze({ status: "/ai/status", chat: "/ai/chat", conversations: "/ai/conversations" });
+
+/**
+ * A client for the application's assistant API, in the B2Y response shape { status, message, data }.
+ * headers() returns the application's own headers (sign-in token, tenant domain) for each request.
+ * @param {{ baseUrl: string, headers?: () => Record<string, string>, paths?: Partial<typeof ASSISTANT_PATHS>, fetch?: typeof fetch, fallbackError?: string }} options
+ */
+export function createAssistantClient({ baseUrl, headers = () => ({}), paths = {}, fetch: fetchImpl = globalThis.fetch, fallbackError = DEFAULT_LABELS.error }) {
+  const route = { ...ASSISTANT_PATHS, ...paths };
+  const call = async (path, init = {}) => {
+    let response;
+    let body;
+    try {
+      response = await fetchImpl(`${baseUrl}${path}`, { ...init, headers: { "Content-Type": "application/json", ...headers(), ...(init.headers ?? {}) } });
+      body = await response.json().catch(() => null);
+    } catch {
+      throw Object.assign(new Error("Assistant request failed"), { userMessage: fallbackError });
+    }
+    if (!response.ok || body?.status !== "SUCCESS") throw Object.assign(new Error("Assistant request failed"), { userMessage: body?.message || fallbackError, status: response.status });
+    return body.data;
+  };
+  return Object.freeze({
+    isEnabled: () => call(route.status).then((data) => data?.enabled === true).catch(() => false),
+    send: ({ message, conversationId }) => call(route.chat, { method: "POST", body: JSON.stringify({ message, ...(conversationId ? { conversationId } : {}) }) }),
+    listConversations: () => call(route.conversations).then((data) => data?.conversations ?? []),
+    loadConversation: (id) => call(`${route.conversations}/${encodeURIComponent(id)}`).then((data) => data?.messages ?? []),
+  });
+}
+
+/**
+ * The assistant as a floating button and chat panel (bottom right), shown only when the server says the
+ * assistant is available to this user. Same look in every application; theme it with --b2y-ai-* variables.
+ * With onLaunch, the button opens the application's own assistant page instead of the panel (consoles that
+ * have a full-page assistant); pass hidden on that page itself.
+ * @param {{ client: ReturnType<typeof createAssistantClient>, onLaunch?: () => void, hidden?: boolean, launcherLabel?: string, closeLabel?: string, avatar?: unknown,
+ *   title?: string, intro?: string, suggestions?: string[], labels?: object, onOpenLink?: (link: string) => void, className?: string, style?: object }} props
+ */
+export function AssistantWidget({ client, onLaunch, hidden = false, launcherLabel = `Ask ${ASSISTANT_NAME}`, closeLabel = "Close", avatar, className = "", style, onOpenLink, ...chat }) {
+  const [enabled, setEnabled] = useState(false);
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    let active = true;
+    client.isEnabled().then((value) => active && setEnabled(value));
+    return () => {
+      active = false;
+    };
+  }, [client]);
+  useEffect(() => {
+    if (!open) return undefined;
+    const onKey = (event) => event.key === "Escape" && setOpen(false);
+    globalThis.addEventListener("keydown", onKey);
+    return () => globalThis.removeEventListener("keydown", onKey);
+  }, [open]);
+  if (!enabled || hidden) return null;
+  if (onLaunch) {
+    return h(
+      "div",
+      { className: `b2y-ai-widget ${className}`.trim(), style },
+      h(
+        "button",
+        { type: "button", className: "b2y-ai-launcher", "aria-label": launcherLabel, onClick: onLaunch },
+        h("span", { className: "b2y-ai-launcher-icon" }, avatar ?? botIcon(28), h("span", { className: "b2y-ai-launcher-dot", "aria-hidden": "true" })),
+        h("span", { className: "b2y-ai-launcher-text" }, launcherLabel),
+      ),
+    );
+  }
+  const openLink = onOpenLink
+    ? (link) => {
+        onOpenLink(link);
+        if (globalThis.matchMedia?.("(max-width: 640px)").matches) setOpen(false);
+      }
+    : undefined;
+  return h(
+    "div",
+    { className: `b2y-ai-widget ${className}`.trim(), style },
+    open
+      ? h(
+          "div",
+          { className: "b2y-ai-widget-panel", role: "dialog", "aria-label": chat.title ?? ASSISTANT_NAME },
+          h("button", { type: "button", className: "b2y-ai-widget-close", "aria-label": closeLabel, onClick: () => setOpen(false) }, icon(CLOSE, 18)),
+          h(AssistantChat, { ...chat, avatar, onOpenLink: openLink, send: client.send, loadConversation: client.loadConversation, listConversations: client.listConversations }),
+        )
+      : null,
+    h(
+      "button",
+      { type: "button", className: `b2y-ai-launcher${open ? " b2y-ai-launcher-open" : ""}`, "aria-expanded": open, "aria-label": open ? closeLabel : launcherLabel, onClick: () => setOpen((value) => !value) },
+      open ? icon(CLOSE, 22) : h("span", { className: "b2y-ai-launcher-icon" }, avatar ?? botIcon(28), h("span", { className: "b2y-ai-launcher-dot", "aria-hidden": "true" })),
+      open ? null : h("span", { className: "b2y-ai-launcher-text" }, launcherLabel),
     ),
   );
 }

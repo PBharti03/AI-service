@@ -11,24 +11,21 @@ closed.
 
 ```
 src/core          AiService (tasks, retries, rate limits, output validation), Context, Errors, Tasks
-src/providers     Groq and OpenAI-compatible providers, endpoint policy
+src/providers     Groq and OpenAI-compatible providers, endpoint policy (internal)
+src/server        runtime, HTTP endpoints, rate limiter, read-only SQL runner (subpath ./server)
 src/copilot       createAiAssistant (AI routing), capabilities, response blocks
 src/analytics     multi-query planner, result merging, charts and observations
 src/sql           SQL policy and the PostgreSQL AST validator
 src/documents     document Q&A; folder store and PDF text (subpaths)
 src/conversations history, retention, folder store (subpath)
-src/ui/react      AssistantChat and styles.css (subpaths)
+src/ui/react      AssistantChat, AssistantWidget, API client, Beya's icon, styles.css (subpaths)
 ```
 
 ## Assistant
 
 ```js
-const ai = createAiService({
-  provider: createProvider({ type: "groq", apiKey, allowedClassifications: ["INTERNAL"] }), // model defaults to GROQ_DEFAULT_MODEL
-  registry: createTaskRegistry([ASSISTANT_ROUTE_TASK, ASSISTANT_RESPOND_TASK, ANALYTICS_PLAN_TASK]),
-  allowPaidProvider: true,
-});
-const assistant = createAiAssistant({ ai, profile, capabilities, history });
+const ai = createDefaultAiService({ apiKey, tasks: [ASSISTANT_ROUTE_TASK, ASSISTANT_RESPOND_TASK, ANALYTICS_PLAN_TASK] });
+const assistant = createAiAssistant({ ai, profile, capabilities, history, requires: { permission: AI_ASSISTANT_PERMISSION, feature: "ACCESS_AI_ASSISTANT" } });
 const { conversationId, status, blocks } = await assistant.reply({ message, context, conversationId });
 ```
 
@@ -39,8 +36,52 @@ const { conversationId, status, blocks } = await assistant.reply({ message, cont
   read-only. Kinds: data, analytics, search, documents, knowledge, calculation, content. A capability may
   return `memory` (server-only JSON) that it receives back on later turns; analytics uses it to re-plan
   follow-ups with the earlier SQL. `shareFacts` decides which code-computed facts may reach the model.
-- **Replies are blocks**: heading, paragraph, bullets, metrics, table, chart, flow, notice, sources. Never
-  SQL, internal ids or raw rows.
+- **Polished fallbacks**: requests to change data, and questions outside the user's role or plan, get a
+  model-written reply that explains what is possible and offers next steps, never a bare refusal.
+- **Name and icon**: the assistant is `ASSISTANT_NAME` (Beya) with the same bot icon in every application;
+  applications do not set them (an `avatar` prop can override the icon if ever needed).
+- **Search** (`createSearchCapability({ fields, sorts, search })`): the model only turns the message into
+  filters over declared fields (validated in code, refinements reuse the previous search); `search()` runs
+  the application's own scoped query and returns item cards. Items never reach the model.
+- **Unavailable hints**: `unavailableHint` on a capability ("Sign in to see your orders.") replaces the
+  role/plan explanation for users who cannot use it.
+- **Replies are blocks**: heading, paragraph, bullets, metrics, table, chart, flow, cards (items with image,
+  price and an app path or https link), notice, sources. Never SQL, internal ids or raw rows.
+
+## Provider and model
+
+`AI_PROVIDER_CONFIG` (src/core/AiService.js) is the only place that names the provider and model for every
+application; provider helpers are internal, so no application can name one. Applications pass only their API
+key (`createAiRuntime({ apiKey, tasks, conversationsDir })` on the server). To change provider or model, edit
+that configuration and release a new package version.
+
+## Server (`@b2y/ai-service/server`)
+
+```js
+const { ai, history } = createAiRuntime({ apiKey, tasks, conversationsDir, retentionDays, logger });
+const endpoints = createAssistantEndpoints({ resolve: async (req) => ({ assistant, context }) | null, limiter, logger });
+mountAssistantRoutes(router, endpoints); // GET /ai/status, POST /ai/chat, GET /ai/conversations[/:id]
+```
+
+`resolve` builds the context with `buildTrustedContext` (global tenant rule: the request's domain tenant must
+be the session's tenant) and returns null when the assistant is not available. One error policy: 403 access,
+429 limits, 400 input, 502 otherwise, in the `{ status, message, data }` shape. Also `createRateLimiter`,
+`runReadOnly(sequelize, sql, { bind | replacements })` and `quoteTables(sequelize, models)`.
+
+## Roles and permissions (global)
+
+Roles and permissions work the same in every B2Y application. Pass the signed-in user's **role permissions as
+stored** (`{ Module, Name }` rows, `"Module:Name"` or codes such as `VIEW_USERS`) and the tenant's **plan feature
+codes**; capabilities and the assistant require them by the same names. Names are normalized
+(`permissionKey`), a name matches in any module unless both sides name one, and a list means "any of".
+
+```js
+const context = { ..., permissions: rolePermissions(roleRows), features: enabledFeatureCodes };
+defineCapability({ ..., requires: { permission: "Generate Order Report", feature: "ACCESS_ORDER" } });
+```
+
+`requires` on `createAiAssistant` (for example `AI_ASSISTANT_PERMISSION`) is checked on every reply and
+conversation call before any history or model access.
 
 ## Context
 
@@ -48,7 +89,7 @@ const { conversationId, status, blocks } = await assistant.reply({ message, cont
 const context = {
   applicationId: "ecommerce-admin", tenantId: "t-42", actor: { type: "USER", userId: "u-7" }, requestId: "r-1",
   permittedTasks: ["assistant.route", "assistant.respond", "analytics.plan"],
-  dataClassification: "INTERNAL", permissions: ["orders:report"], features: ["orders"],
+  dataClassification: "INTERNAL", permissions: ["Order Management:Generate Order Report"], features: ["ACCESS_ORDER"],
 };
 ```
 
@@ -79,11 +120,14 @@ again; no credentials or grants are stored. Expired conversations are deleted by
 ## Chat UI
 
 ```jsx
-<AssistantChat send={send} loadConversation={load} listConversations={list} />  // "@b2y/ai-service/ui/react" + styles.css
+const client = createAssistantClient({ baseUrl, headers: () => ({ Authorization, "tenant-domain": domain }) });
+<AssistantWidget client={client} onOpenLink={navigate} />                                   // floating launcher + panel
+<AssistantChat send={client.send} loadConversation={client.loadConversation} listConversations={client.listConversations} />
 ```
 
 Restores the latest server-side conversation, New chat, recent chats, typing indicator, retry. Theme with
-`--b2y-ai-*` CSS variables; `.b2y-ai-theme` applies the theme to an application's own layout.
+`--b2y-ai-*` CSS variables (`--b2y-ai-icon-accent` for the bot's teal); the launcher bot tilts, blinks and its
+signal pulses, except for users who prefer reduced motion.
 
 ## Rate limits
 
@@ -102,6 +146,5 @@ fast without reaching the provider until the wait has passed (at most one minute
 
 ## Install and verify
 
-Raise the version, `npm run verify`, `npm pack`, copy the tarball into the consumer's `vendor/` and depend
-on `"@b2y/ai-service": "file:vendor/b2y-ai-service-<version>.tgz"`. `tests/PublicApi.test.js` pins the
-public API.
+Raise the version, `npm run verify` (lint), `npm pack`, copy the tarball into the consumer's `vendor/` and
+depend on `"@b2y/ai-service": "file:vendor/b2y-ai-service-<version>.tgz"`.

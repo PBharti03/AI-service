@@ -695,7 +695,9 @@ export const GROQ_BASE_URL = "https://api.groq.com/openai/v1";
 export const GROQ_DEFAULT_TIMEOUT_MS = 60_000;
 /** Groq model used when an application names none; the package's tasks are tuned for it. */
 export const GROQ_DEFAULT_MODEL = "openai/gpt-oss-120b";
-export const PROVIDER_TYPES = Object.freeze(["groq", "openai-compatible"]);
+/** Provider kinds the package can talk to. */
+export const PROVIDER_TYPE = Object.freeze({ GROQ: "groq", OPENAI_COMPATIBLE: "openai-compatible" });
+export const PROVIDER_TYPES = Object.freeze(Object.values(PROVIDER_TYPE));
 
 const apiKeySchema = z
   .string()

@@ -109,6 +109,7 @@ export function blocksToText(blocks) {
       if (block.type === "bullets") return block.items.map((item) => `- ${item}`).join("\n");
       if (block.type === "metrics") return block.items.map((item) => `${item.label}: ${item.value}`).join("; ");
       if (block.type === "notice") return block.items.join(" ");
+      if (block.type === "cards") return [block.title, ...block.items.map((item) => `- ${item.title}${item.price ? ` (${item.price})` : ""}`)].filter(Boolean).join("\n");
       if (block.type === "flow") return [block.title, ...block.nodes.map((node, index) => `${index + 1}. ${node.label}`)].filter(Boolean).join("\n");
       return "";
     })

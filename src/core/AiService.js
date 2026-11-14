@@ -2,7 +2,8 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { z } from "zod";
 import { classificationRank, dataClassificationSchema, parseTrustedContext } from "./Context.js";
 import { AiServiceError, createCancelledError, ErrorCodes, rateLimitInfo, summarizeZodError, toAiServiceError } from "./Errors.js";
-import { isRegisteredTask } from "./Tasks.js";
+import { createTaskRegistry, isRegisteredTask } from "./Tasks.js";
+import { createProvider, GROQ_DEFAULT_MODEL, PROVIDER_TYPE } from "../providers/Providers.js";
 
 /** Longest the service refuses calls after a provider rate limit, and the wait without a Retry-After (ms). */
 const RATE_LIMIT_COOLDOWN_MAX_MS = 60_000;
@@ -528,4 +529,34 @@ export function assertProviderAcceptsClassification(provider, actual) {
       details: { providerId: provider.id, classification: actual, reason: "provider" },
     });
   }
+}
+
+/**
+ * The one place that chooses the AI provider and model for every B2Y application. Applications never name a
+ * provider or model: to switch provider or model, change this configuration and release the package.
+ */
+export const AI_PROVIDER_CONFIG = Object.freeze({
+  type: PROVIDER_TYPE.GROQ,
+  model: GROQ_DEFAULT_MODEL,
+  allowedClassifications: Object.freeze(["INTERNAL"]),
+  paid: true,
+  invalidOutputRetries: 1,
+});
+
+/**
+ * An AiService on the platform's provider and model (AI_PROVIDER_CONFIG). Applications supply only their
+ * API key and the tasks they run.
+ * @param {{ apiKey: string, tasks: readonly object[], logger?: object, onUsage?: Function, fetch?: typeof fetch }} options
+ */
+export function createDefaultAiService({ apiKey, tasks, logger, onUsage, fetch }) {
+  if (typeof apiKey !== "string" || apiKey.trim() === "") throw new AiServiceError(ErrorCodes.CONFIG_INVALID, "createDefaultAiService needs the provider API key");
+  const { type, model, allowedClassifications, paid, invalidOutputRetries } = AI_PROVIDER_CONFIG;
+  return createAiService({
+    provider: createProvider({ type, apiKey, model, allowedClassifications: [...allowedClassifications] }, fetch ? { fetch } : {}),
+    registry: createTaskRegistry(tasks),
+    allowPaidProvider: paid,
+    retry: { invalidOutputRetries },
+    ...(logger ? { logger } : {}),
+    ...(onUsage ? { onUsage } : {}),
+  });
 }
