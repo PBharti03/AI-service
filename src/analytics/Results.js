@@ -1,11 +1,10 @@
 import { z } from "zod";
-import { CHART_TYPES } from "../constants/Enums.js";
-export { CHART_TYPES } from "../constants/Enums.js";
+import { CHART_TYPES } from "../enums/ChartType.js";
+export { CHART_TYPES } from "../enums/ChartType.js";
 
 /**
  * Turns a checked query result into a chart specification the UI can draw: when the shape fits (one label
- * column followed by 1-6 numeric columns), otherwise null and the caller shows a table. Built in code from
- * the result; no value is ever sent to a model.
+ * column followed by 1-6 numeric columns), otherwise null and the caller shows a table.
  */
 
 const MAX_POINTS = 36;
@@ -74,8 +73,8 @@ export function formatLabels(cells, valueLabels = {}) {
 }
 
 /**
- * "Long" results (label, category, number), such as month / platform / count, become one row per label
- * with a column per category (at most MAX_SERIES categories; missing combinations count as 0).
+ * "Long" results (label, category, number), such as month / platform / count, become one row per label with a
+ * column per category (at most MAX_SERIES categories; missing combinations count as 0).
  */
 function pivotLong(result) {
   const { columns, rows } = result;
@@ -154,11 +153,7 @@ export function buildResultChart(result, { chartHint, title, fingerprints, gener
   return parsed.success ? parsed.data : null;
 }
 
-/**
- * Combines and describes checked query results in code. Nothing here calls a model: every observation is
- * computed from the result cells and carries the values it is based on (evidence), so the UI can show why
- * a statement was made.
- */
+/** Combines and describes checked query results in code. */
 
 /**
  * @typedef {Object} AnalyticsSection
@@ -387,10 +382,7 @@ export function observeSection(section, options = {}) {
   return out;
 }
 
-/**
- * Whether today falls in the latest period. The period length comes from the labels: years (all on
- * 1 January), months (all on the 1st), otherwise the spacing of the last two labels (a week, a day ...).
- */
+/** Whether today falls in the latest period. */
 function periodContains(latestKey, rows, today) {
   const keys = rows.map((row) => (typeof row[0] === "string" ? row[0].slice(0, 10) : ""));
   if (keys.every((key) => key.slice(5) === "01-01")) return today.slice(0, 4) === latestKey.slice(0, 4);

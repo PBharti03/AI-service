@@ -3,12 +3,14 @@ import { chartSpecSchema } from "../analytics/Results.js";
 import { checkRequirement, meetsRequirement } from "../core/Context.js";
 import { AiServiceError, ErrorCodes, summarizeZodError } from "../core/Errors.js";
 import { defineTask } from "../core/Tasks.js";
-import { CAPABILITY_KINDS, DATA_CLASSIFICATION, SEARCH_FIELD_TYPES, SEARCH_FILTERS_TASK_ID } from "../constants/Enums.js";
-export { CAPABILITY_KINDS, SEARCH_FILTERS_TASK_ID } from "../constants/Enums.js";
+import { DATA_CLASSIFICATION } from "../enums/DataClassification.js";
+import { MAX_MESSAGE_CHARS } from "../constants/AssistantConstants.js";
+/** "content" is generated output (for example a flowchart); unlike data results the model may see it later. */
+export const CAPABILITY_KINDS = Object.freeze(["data", "analytics", "search", "documents", "knowledge", "calculation", "content"]);
 
 /**
- * The response format every assistant reply uses: a short list of blocks a UI can render without
- * knowing where they came from. Blocks never contain SQL, tool names, internal ids or raw JSON.
+ * The response format every assistant reply uses: a short list of blocks a UI can render without knowing
+ * where they came from.
  */
 
 const text = (max) => z.string().trim().min(1).max(max);
@@ -109,15 +111,7 @@ export function analyticsReportToBlocks(report, { labels = {}, locale = "en-US" 
 
 /**
  * A capability is something the consuming application lets the assistant do for a user: answer data
- * questions, search its records, read its documents, run a business calculation ... The application
- * defines what it exposes and implements `handle`; the package decides when to use it (routing), checks
- * the application's requirement against the trusted context before calling it, and validates its result.
- *
- * Only read-only capabilities exist in this version (`access: "read"`).
- *
- * `shareFacts` is the application's decision about what of a result may reach the model for follow-up
- * reasoning (advice, "why ..." questions): `facts` are short, code-computed statements such as
- * "Sales: 12,400 in Oct 2026 compared with 15,100 in Sep 2026 (-18%)". Never raw rows. Default: nothing.
+ * questions, search its records, read its documents, run a business calculation ...
  */
 
 const CAPABILITY_ID = /^[a-z][a-z0-9-]{0,63}$/;
@@ -171,11 +165,7 @@ export function isCapabilityGranted(capability, context) {
   return meetsRequirement(context, capability.requires).ok;
 }
 
-/**
- * A capability over an analytics assistant (createAnalyticsAssistant). createAssistant(context) builds
- * the assistant for the request, so the application can scope it to the request's tenant and boundaries.
- * shareFacts(section) decides per result section whether its observations may reach the model.
- */
+/** A capability over an analytics assistant (createAnalyticsAssistant). */
 export function createAnalyticsCapability({ id, title, description, examples, requires, createAssistant, shareFacts, labels, locale, timeoutMs }) {
   if (typeof createAssistant !== "function") throw new AiServiceError(ErrorCodes.CONFIG_INVALID, "createAnalyticsCapability needs createAssistant(context)");
   if (shareFacts !== undefined && typeof shareFacts !== "function") throw new AiServiceError(ErrorCodes.CONFIG_INVALID, "shareFacts must be a function(section) => boolean");
@@ -235,20 +225,18 @@ export function createDocumentsCapability({ id, title, description, examples, re
   });
 }
 
-// ── Search over a consumer's listing (products, properties, records) ─────────────────────────────
-
 const OPERATORS = { text: ["contains", "eq"], number: ["eq", "lte", "gte"], boolean: ["eq"], enum: ["eq"] };
 const fieldName = z.string().regex(/^[a-z][a-z0-9_]{0,39}$/);
 const searchFieldSchema = z.strictObject({
   name: fieldName,
-  type: z.enum(SEARCH_FIELD_TYPES),
+  type: z.enum(["text", "number", "boolean", "enum"]),
   description: z.string().trim().min(1).max(160),
   values: z.array(z.string().trim().min(1).max(60)).max(60).optional(),
 });
 const filterSchema = z.strictObject({ field: z.string().max(40), op: z.enum(["contains", "eq", "lte", "gte"]), value: z.union([z.string().max(100), z.number().finite(), z.boolean()]) });
 
 export const SEARCH_FILTERS_TASK = defineTask({
-  id: SEARCH_FILTERS_TASK_ID,
+  id: "search.filters",
   version: 1,
   promptVersion: "v1",
   description: "Turn a request into filters over a listing the application searches itself",
@@ -268,7 +256,7 @@ export const SEARCH_FILTERS_TASK = defineTask({
   ].join("\n"),
   dataLabel: "search request",
   inputSchema: z.strictObject({
-    question: z.string().min(1).max(4000),
+    question: z.string().min(1).max(MAX_MESSAGE_CHARS),
     history: z.array(z.strictObject({ role: z.enum(["user", "assistant"]), text: z.string().min(1).max(2000) })).max(8),
     fields: z.array(searchFieldSchema).max(16),
     sorts: z.array(z.strictObject({ name: fieldName, description: z.string().max(160) })).max(8),

@@ -4,13 +4,11 @@ import { createDefaultAiService } from "../core/AiService.js";
 import { aiUserMessage, AiServiceError, errorCategory, ErrorCategories, isRateLimited, rateLimitInfo } from "../core/Errors.js";
 import { createConversationHistory, scheduleConversationCleanup } from "../conversations/ConversationHistory.js";
 import { createFolderConversationStore } from "../conversations/FolderConversationStore.js";
-import { AI_MESSAGES, CONVERSATION_LIST_LIMIT, HTTP_STATUS, STATEMENT_TIMEOUT_MS } from "../constants/Constants.js";
-import { RESPONSE_STATUS } from "../constants/Enums.js";
-export { AI_MESSAGES } from "../constants/Constants.js";
-export { RESPONSE_STATUS } from "../constants/Enums.js";
+import { STATEMENT_TIMEOUT_MS } from "../constants/AnalyticsConstants.js";
+import { CONVERSATION_LIST_LIMIT } from "../constants/ConversationConstants.js";
+import { AI_MESSAGES, HTTP_STATUS, RATE_LIMIT_DEFAULTS, RESPONSE_STATUS } from "../constants/ServerConstants.js";
+export { AI_MESSAGES, RESPONSE_STATUS } from "../constants/ServerConstants.js";
 
-
-const DAY_MS = 24 * 60 * 60 * 1000;
 const noop = () => {};
 const quietLogger = Object.freeze({ info: noop, warn: noop, error: noop });
 
@@ -35,7 +33,7 @@ export function createAiRuntime({ apiKey, tasks, conversationsDir, retentionDays
  * context, so a user cannot reset them.
  * @param {{ perUser?: number, perUserWindowMs?: number, perTenant?: number, perTenantWindowMs?: number, now?: () => number }} options
  */
-export function createRateLimiter({ perUser = 15, perUserWindowMs = 10 * 60 * 1000, perTenant = 500, perTenantWindowMs = DAY_MS, now = () => Date.now() } = {}) {
+export function createRateLimiter({ perUser = RATE_LIMIT_DEFAULTS.perUser, perUserWindowMs = RATE_LIMIT_DEFAULTS.perUserWindowMs, perTenant = RATE_LIMIT_DEFAULTS.perTenant, perTenantWindowMs = RATE_LIMIT_DEFAULTS.perTenantWindowMs, now = () => Date.now() } = {}) {
   const windows = new Map();
   const hit = (key, limit, windowMs) => {
     const at = now();
@@ -92,7 +90,7 @@ const defaultRespond = (res, httpStatus, ok, message, data) => res.status(httpSt
  * @param {{ resolve: (req: object) => Promise<{ assistant: object, context: object } | null>, limiter?: object, logger?: object,
  *   messages?: Partial<typeof AI_MESSAGES>, respond?: Function }} options
  */
-export function createAssistantEndpoints({ resolve, limiter, logger = quietLogger, messages = {}, respond = defaultRespond }) {
+export function createAssistantEndpoints({ resolve, limiter = createRateLimiter(), logger = quietLogger, messages = {}, respond = defaultRespond }) {
   if (typeof resolve !== "function") throw new TypeError("createAssistantEndpoints needs resolve(req)");
   const text = { ...AI_MESSAGES, ...messages };
   const fail = (res, error, what) => {
@@ -122,7 +120,7 @@ export function createAssistantEndpoints({ resolve, limiter, logger = quietLogge
     chat: handle("AI chat", async (req, res) => {
       const ready = await resolve(req);
       if (!ready) return respond(res, HTTP_STATUS.NOT_FOUND, false, text.NOT_AVAILABLE);
-      const allowed = limiter ? limiter.take({ tenantId: ready.context.tenantId, userId: ready.context.actor.userId }) : { ok: true };
+      const allowed = limiter.take({ tenantId: ready.context.tenantId, userId: ready.context.actor.userId });
       if (!allowed.ok) return respond(res, HTTP_STATUS.TOO_MANY, false, text.TOO_MANY_MESSAGES, { rateLimited: true, retryAfterSeconds: allowed.retryAfterSeconds });
       const reply = await ready.assistant.reply({ message: req.body?.message, context: ready.context, conversationId: req.body?.conversationId });
       logger.info("AI chat answered", { route: reply.route, status: reply.status, blocks: reply.blocks.length });
@@ -142,8 +140,8 @@ export function createAssistantEndpoints({ resolve, limiter, logger = quietLogge
 }
 
 /**
- * Registers the endpoints on an Express router (after the application's own authentication middleware):
- * GET {base}/status, POST {base}/chat, GET {base}/conversations, GET {base}/conversations/:id.
+ * Registers the endpoints on an Express router (after the application's own authentication middleware): GET
+ * {base}/status, POST {base}/chat, GET {base}/conversations, GET {base}/conversations/:id.
  */
 export function mountAssistantRoutes(router, endpoints, base = "/ai") {
   router.get(`${base}/status`, endpoints.status);

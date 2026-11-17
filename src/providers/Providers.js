@@ -1,16 +1,10 @@
 import { z } from "zod";
 import { dataClassificationSchema } from "../core/Context.js";
 import { AiServiceError, createCancelledError, ErrorCodes, summarizeZodError, systemErrorCode } from "../core/Errors.js";
-import { APPROVED_PAID_HOSTS, DEFAULT_MAX_REQUEST_BYTES, DEFAULT_MAX_RESPONSE_BYTES, GROQ_BASE_URL, GROQ_DEFAULT_MODEL, GROQ_DEFAULT_TIMEOUT_MS } from "../constants/Constants.js";
-import { PROVIDER_TYPE, PROVIDER_TYPES } from "../constants/Enums.js";
-export { APPROVED_PAID_HOSTS, DEFAULT_MAX_REQUEST_BYTES, DEFAULT_MAX_RESPONSE_BYTES, GROQ_BASE_URL, GROQ_DEFAULT_MODEL, GROQ_DEFAULT_TIMEOUT_MS } from "../constants/Constants.js";
-export { PROVIDER_TYPE, PROVIDER_TYPES } from "../constants/Enums.js";
+import { createDeadline } from "../core/Deadline.js";
+import { APPROVED_PROVIDER_HOSTS, DEFAULT_MAX_REQUEST_BYTES, DEFAULT_MAX_RESPONSE_BYTES } from "../constants/ProviderConstants.js";
 
 // Types only: the contract every model backend implements (documented for editors via JSDoc).
-
-/**
- * @typedef {"SELF_HOSTED" | "PAID"} ProviderKind
- */
 
 /**
  * How the provider is asked to constrain output. Support differs between servers and versions (vLLM and others), so this is a per-deployment setting confirmed by integration tests, never assumed. Output is always validated with Zod afterwards regardless of the mode.
@@ -20,7 +14,6 @@ export { PROVIDER_TYPE, PROVIDER_TYPES } from "../constants/Enums.js";
 /**
  * @typedef {Object} ProviderInfo
  * @property {string} id
- * @property {ProviderKind} kind
  * @property {string} model
  * @property {string | null} modelRevision
  * @property {readonly DataClassification[]} allowedClassifications
@@ -84,187 +77,20 @@ export { PROVIDER_TYPE, PROVIDER_TYPES } from "../constants/Enums.js";
 
 export {};
 
-/**
- * @typedef {Object} EndpointPolicyOptions
- * @property {ProviderKind} providerKind
- * @property {boolean} allowInsecurePrivateHttp - Permit plain HTTP to allow-listed private IPs and single-label hosts (for example "vllm" on a Docker network).
- * @property {readonly string[]} allowedHosts - Administrator-approved hosts for SELF_HOSTED providers. Every self-hosted host must be listed. Ignored for PAID.
- */
-
-const HOSTNAME_PATTERN = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/;
-const IPV4_PATTERN = /^\d{1,3}(\.\d{1,3}){3}$/;
-
-/**
- * Validates a provider base URL before any request is made.
- *
- * - PAID providers: HTTPS, default port, and a hostname in APPROVED_PAID_HOSTS.
- * - SELF_HOSTED providers: the host must be in the administrator allow-list.
- *   Nothing is trusted implicitly, including single-label names and private
- *   IPs. Plain HTTP is only allowed to allow-listed loopback hosts, or to
- *   allow-listed private / single-label hosts when allowInsecurePrivateHttp
- *   is set; never to public hosts. Approved PAID hosts cannot be configured as
- *   SELF_HOSTED, so the paid-provider opt-in cannot be bypassed.
- * - Always refused: link-local (cloud metadata), unspecified, multicast and
- *   IPv4-mapped IPv6 addresses; credentials, queries and fragments in the URL.
- *
- * DNS is not resolved. Node's built-in fetch does not expose a supported way
- * to check the address it actually connects to, so a resolved-address check
- * here could not be guaranteed to match the connection (DNS rebinding). The
- * allow-list is the control: administrators must only list names whose DNS
- * they control.
- */
-export function resolveProviderBaseUrl(baseUrl, options) {
-  const url = parseBaseUrl(baseUrl);
-  const host = hostOf(url);
-  const hostClass = classifyHost(host);
-
-  if (hostClass === "forbidden") {
-    throw configError("Provider host is not permitted", "forbidden_address");
-  }
-
-  if (options.providerKind === "PAID") {
-    if (url.protocol !== "https:" || url.port !== "" || !APPROVED_PAID_HOSTS.includes(host)) {
-      throw configError("Paid providers require HTTPS to an approved hostname", "paid_endpoint_not_allowed");
-    }
-    return withTrailingSlash(url);
-  }
-
-  if (APPROVED_PAID_HOSTS.includes(host)) {
-    throw configError("Hosted provider endpoints must be configured as PAID providers", "paid_host_requires_paid_kind");
-  }
-  const allowedHosts = options.allowedHosts.map(normalizeAllowedHost);
-  if (!allowedHosts.includes(host)) {
-    throw configError("Self-hosted provider host is not in the administrator allow-list", "host_not_allowlisted");
-  }
-
-  if (url.protocol === "http:") {
-    const privateNetwork = hostClass === "private" || hostClass === "internal-name";
-    if (hostClass !== "loopback" && !(privateNetwork && options.allowInsecurePrivateHttp)) {
-      throw configError(
-        "Plain HTTP is only allowed for loopback, or private hosts when allowInsecurePrivateHttp is set",
-        "insecure_http",
-      );
-    }
-  }
-
-  return withTrailingSlash(url);
-}
-
-/**
- * Normalises an allow-list entry the same way URLs are normalised, so
- * "LOCALHOST", "127.1" and "::1" compare correctly. Entries must be a bare
- * hostname or IP address (no scheme, port or path).
- */
-export function normalizeAllowedHost(entry) {
-  const bracketed = entry.includes(":") ? `[${entry.replace(/^\[|\]$/g, "")}]` : entry;
-  let url;
-  try {
-    url = new URL(`http://${bracketed}/`);
-  } catch {
-    throw configError("Allow-listed host is invalid", "invalid_allowed_host");
-  }
-  if (url.port !== "" || url.pathname !== "/" || url.search !== "" || url.hash !== "" || url.username !== "") {
-    throw configError("Allow-listed host must be a bare hostname or IP address", "invalid_allowed_host");
-  }
-  const host = hostOf(url);
-  if (classifyHost(host) === "forbidden") {
-    throw configError("Allow-listed host is not permitted", "forbidden_address");
-  }
-  return host;
-}
-
-/** Returns the base URL's host if it is loopback; otherwise throws CONFIG_INVALID. */
-export function loopbackHostOf(baseUrl) {
-  const host = hostOf(parseBaseUrl(baseUrl));
-  if (classifyHost(host) !== "loopback") {
-    throw configError("This provider preset only allows loopback endpoints", "loopback_required");
-  }
-  return host;
-}
-
-function parseBaseUrl(baseUrl) {
+/** The provider base URL: HTTPS on the default port to an approved host, without credentials or a query. */
+function providerBaseUrl(baseUrl) {
   let url;
   try {
     url = new URL(baseUrl);
   } catch {
     throw configError("Provider baseUrl is not a valid URL", "invalid_url");
   }
-  if (url.protocol !== "https:" && url.protocol !== "http:") {
-    throw configError("Provider baseUrl must use http or https", "unsupported_protocol");
+  if (url.protocol !== "https:" || url.port !== "" || url.username !== "" || url.password !== "" || url.search !== "" || url.hash !== "") {
+    throw configError("Provider baseUrl must be plain HTTPS", "insecure_url");
   }
-  if (url.username !== "" || url.password !== "") {
-    throw configError("Provider baseUrl must not contain credentials", "credentials_in_url");
-  }
-  if (url.search !== "" || url.hash !== "") {
-    throw configError("Provider baseUrl must not contain a query or fragment", "query_or_fragment");
-  }
+  if (!APPROVED_PROVIDER_HOSTS.includes(url.hostname.toLowerCase())) throw configError("Provider host is not approved", "host_not_approved");
+  if (!url.pathname.endsWith("/")) url.pathname = `${url.pathname}/`;
   return url;
-}
-
-function hostOf(url) {
-  return url.hostname.replace(/^\[(.*)\]$/, "$1").toLowerCase();
-}
-
-function classifyHost(host) {
-  if (host === "localhost") {
-    return "loopback";
-  }
-  if (IPV4_PATTERN.test(host)) {
-    return classifyIPv4(host);
-  }
-  if (host.includes(":")) {
-    return classifyIPv6(host);
-  }
-  if (host.length > 253 || !HOSTNAME_PATTERN.test(host)) {
-    return "forbidden";
-  }
-  return host.includes(".") ? "public" : "internal-name";
-}
-
-function classifyIPv4(host) {
-  const octets = host.split(".").map(Number);
-  const [a = -1, b = -1] = octets;
-  if (octets.some((octet) => octet > 255)) {
-    return "forbidden";
-  }
-  if (a === 127) {
-    return "loopback";
-  }
-  if (a === 0 || a >= 224 || (a === 169 && b === 254)) {
-    return "forbidden";
-  }
-  if (a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168)) {
-    return "private";
-  }
-  return "public";
-}
-
-function classifyIPv6(host) {
-  if (host === "::1") {
-    return "loopback";
-  }
-  if (host === "::" || host.startsWith("::ffff:")) {
-    return "forbidden";
-  }
-  const firstHextet = Number.parseInt(host.split(":")[0] ?? "", 16);
-  if (Number.isNaN(firstHextet)) {
-    return "forbidden";
-  }
-  if ((firstHextet & 0xffc0) === 0xfe80 || (firstHextet & 0xff00) === 0xff00) {
-    return "forbidden";
-  }
-  if ((firstHextet & 0xfe00) === 0xfc00) {
-    return "private";
-  }
-  return "public";
-}
-
-function withTrailingSlash(url) {
-  const normalized = new URL(url.href);
-  if (!normalized.pathname.endsWith("/")) {
-    normalized.pathname = `${normalized.pathname}/`;
-  }
-  return normalized;
 }
 
 function configError(message, reason) {
@@ -277,13 +103,7 @@ function configError(message, reason) {
  * @property {() => number} [now]
  */
 
-
-/**
- * Network failures worth retrying: the server was briefly unreachable or the
- * connection dropped. Everything else (redirects, invalid headers or URLs,
- * TLS and DNS-not-found errors, unknown failures) is deterministic and is
- * reported as non-retryable.
- */
+/** Network failures worth retrying: the server was briefly unreachable or the connection dropped. */
 const TRANSIENT_NETWORK_CODES = new Set([
   "ECONNREFUSED",
   "ECONNRESET",
@@ -302,7 +122,6 @@ const TRANSIENT_NETWORK_CODES = new Set([
 
 const providerConfigSchema = z.strictObject({
   id: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
-  kind: z.enum(["SELF_HOSTED", "PAID"]),
   baseUrl: z.string().min(1).max(2048),
   model: z.string().min(1).max(200),
   modelRevision: z.string().min(1).max(200).optional(),
@@ -312,13 +131,10 @@ const providerConfigSchema = z.strictObject({
     .string()
     .min(1)
     .max(4096)
-    .regex(/^[\x21-\x7e]+$/)
-    .optional(),
+    .regex(/^[\x21-\x7e]+$/),
   timeoutMs: z.number().int().min(100).max(600_000),
   allowedClassifications: z.array(dataClassificationSchema).min(1),
   structuredOutput: z.enum(["json_schema", "json_object", "none"]),
-  allowInsecurePrivateHttp: z.boolean().default(false),
-  allowedHosts: z.array(z.string().min(1).max(253)).max(20).default([]),
   maxRequestBytes: z.number().int().min(1024).max(5_000_000).default(DEFAULT_MAX_REQUEST_BYTES),
   maxResponseBytes: z.number().int().min(1024).max(10_000_000).default(DEFAULT_MAX_RESPONSE_BYTES),
 });
@@ -351,13 +167,13 @@ const modelListSchema = z.object({
 });
 
 /**
- * Adapter for servers exposing the OpenAI Chat Completions API
- * (`POST {baseUrl}chat/completions`, `GET {baseUrl}models`), such as vLLM.
- *
- * The API key, if any, is held only in this closure: it is not a property of
- * the returned object, so serializing or logging the provider cannot leak it.
+ * The provider client for any OpenAI-compatible Chat Completions API (`POST {baseUrl}chat/completions`, `GET
+ * {baseUrl}models`), configured by AI_PROVIDER_CONFIG.
+ * @param {{ id: string, baseUrl: string, model: string, apiKey: string, timeoutMs: number, structuredOutput: StructuredOutputMode, allowedClassifications: DataClassification[], modelRevision?: string, maxRequestBytes?: number, maxResponseBytes?: number }} config
+ * @param {{ fetch?: typeof fetch, now?: () => number }} [dependencies]
+ * @returns {ChatProvider}
  */
-export function createOpenAICompatibleProvider(config, dependencies = {}) {
+export function createProvider(config, dependencies = {}) {
   const parsed = providerConfigSchema.safeParse(config);
   if (!parsed.success) {
     throw new AiServiceError(ErrorCodes.CONFIG_INVALID, "Provider configuration is invalid", {
@@ -365,18 +181,13 @@ export function createOpenAICompatibleProvider(config, dependencies = {}) {
     });
   }
   const settings = parsed.data;
-  const baseUrl = resolveProviderBaseUrl(settings.baseUrl, {
-    providerKind: settings.kind,
-    allowInsecurePrivateHttp: settings.allowInsecurePrivateHttp,
-    allowedHosts: settings.allowedHosts,
-  });
+  const baseUrl = providerBaseUrl(settings.baseUrl);
   const completionsUrl = new URL("chat/completions", baseUrl);
   const modelsUrl = new URL("models", baseUrl);
   const now = dependencies.now ?? (() => performance.now());
 
   const info = Object.freeze({
     id: settings.id,
-    kind: settings.kind,
     model: settings.model,
     modelRevision: settings.modelRevision ?? null,
     allowedClassifications: Object.freeze([...settings.allowedClassifications]),
@@ -387,7 +198,7 @@ export function createOpenAICompatibleProvider(config, dependencies = {}) {
     return {
       accept: "application/json",
       "content-type": "application/json",
-      ...(settings.apiKey === undefined ? {} : { authorization: `Bearer ${settings.apiKey}` }),
+      authorization: `Bearer ${settings.apiKey}`,
     };
   }
 
@@ -401,8 +212,8 @@ export function createOpenAICompatibleProvider(config, dependencies = {}) {
       throw createCancelledError();
     }
 
-    const timeoutSignal = AbortSignal.timeout(settings.timeoutMs);
-    const signal = callerSignal === undefined ? timeoutSignal : AbortSignal.any([timeoutSignal, callerSignal]);
+    const deadline = createDeadline(settings.timeoutMs, callerSignal);
+    const { signal } = deadline;
     const fetchImpl = dependencies.fetch ?? globalThis.fetch;
 
     try {
@@ -444,16 +255,18 @@ export function createOpenAICompatibleProvider(config, dependencies = {}) {
       if (error instanceof AiServiceError) {
         throw error;
       }
-      if (isAborted(callerSignal)) {
+      if (callerSignal?.aborted === true) {
         throw createCancelledError();
       }
-      if (isAborted(timeoutSignal)) {
+      if (deadline.expired()) {
         throw new AiServiceError(ErrorCodes.PROVIDER_TIMEOUT, "Provider request timed out", {
           retryable: true,
           details: { timeoutMs: settings.timeoutMs },
         });
       }
       throw networkError(error);
+    } finally {
+      deadline.dispose();
     }
   }
 
@@ -566,14 +379,6 @@ async function readLimitedText(response, limitBytes) {
   }
 }
 
-/**
- * Signals abort asynchronously, so this is read through a function call:
- * TypeScript would otherwise keep a narrowing from an earlier check.
- */
-function isAborted(signal) {
-  return signal?.aborted === true;
-}
-
 async function discardBody(response) {
   try {
     await response.body?.cancel();
@@ -592,11 +397,7 @@ async function cancelReader(reader) {
   }
 }
 
-/**
- * Classifies a fetch failure that was not a timeout or cancellation. Only a
- * type name and system error code are kept; the raw error is dropped because
- * its message can quote header values (including the API key) or URLs.
- */
+/** Classifies a fetch failure that was not a timeout or cancellation. */
 function networkError(error) {
   if (isRedirectRejection(error)) {
     return new AiServiceError(ErrorCodes.PROVIDER_HTTP_ERROR, "Provider attempted a redirect, which is not allowed", {
@@ -663,15 +464,7 @@ function responseTooLarge(limitBytes) {
   });
 }
 
-function mapFinishReason(value) {
-  if (value === "stop") {
-    return "stop";
-  }
-  if (value === "length") {
-    return "length";
-  }
-  return "other";
-}
+const mapFinishReason = (value) => (value === "stop" || value === "length" ? value : "other");
 
 function mapUsage(usage) {
   const promptTokens = usage?.prompt_tokens ?? null;
@@ -679,89 +472,4 @@ function mapUsage(usage) {
   const reportedTotal = usage?.total_tokens ?? null;
   const derivedTotal = promptTokens !== null && completionTokens !== null ? promptTokens + completionTokens : null;
   return { promptTokens, completionTokens, totalTokens: reportedTotal ?? derivedTotal };
-}
-
-/**
- * Builds a ChatProvider from configuration, so a consumer changes provider by changing configuration,
- * not code. Every provider-specific detail (endpoint, headers, response format, error mapping) stays
- * behind the ChatProvider interface; consumers only ever call createAiService({ provider }).
- *
- * Fails closed: unknown types, unknown fields, missing keys and invalid values throw CONFIG_INVALID
- * before any request is made. There is no default classification and no fallback provider.
- */
-
-const apiKeySchema = z
-  .string()
-  .min(1)
-  .max(4096)
-  .regex(/^[\x21-\x7e]+$/);
-const structuredOutputSchema = z.enum(["json_schema", "json_object", "none"]);
-
-const groqConfigSchema = z.strictObject({
-  id: z
-    .string()
-    .regex(/^[a-z][a-z0-9-]{0,63}$/)
-    .default(PROVIDER_TYPE.GROQ),
-  apiKey: apiKeySchema,
-  model: z.string().min(1).max(200).default(GROQ_DEFAULT_MODEL),
-  modelRevision: z.string().min(1).max(200).optional(),
-  // Required: what may be sent to a paid provider is the consumer's decision, never a default.
-  allowedClassifications: z.array(dataClassificationSchema).min(1),
-  timeoutMs: z.number().int().min(100).max(600_000).default(GROQ_DEFAULT_TIMEOUT_MS),
-  structuredOutput: structuredOutputSchema.default("json_schema"),
-  maxRequestBytes: z.number().int().min(1024).max(5_000_000).optional(),
-  maxResponseBytes: z.number().int().min(1024).max(10_000_000).optional(),
-});
-
-function invalid(error, schema, what) {
-  return new AiServiceError(ErrorCodes.CONFIG_INVALID, `${what} configuration is invalid`, {
-    details: summarizeZodError(error, schema),
-  });
-}
-
-/**
- * Groq (paid, api.groq.com) through its OpenAI-compatible API. The service using it must also be
- * created with allowPaidProvider: true.
- * @param {{ apiKey: string, model?: string, allowedClassifications: DataClassification[], id?: string, modelRevision?: string, timeoutMs?: number, structuredOutput?: StructuredOutputMode, maxRequestBytes?: number, maxResponseBytes?: number }} config
- * @param {{ fetch?: typeof fetch, now?: () => number }} [dependencies]
- * @returns {ChatProvider}
- */
-export function createGroqProvider(config, dependencies = {}) {
-  const parsed = groqConfigSchema.safeParse(config);
-  if (!parsed.success) throw invalid(parsed.error, groqConfigSchema, "Groq provider");
-  const settings = parsed.data;
-  return createOpenAICompatibleProvider(
-    {
-      id: settings.id,
-      kind: "PAID",
-      baseUrl: GROQ_BASE_URL,
-      model: settings.model,
-      ...(settings.modelRevision === undefined ? {} : { modelRevision: settings.modelRevision }),
-      apiKey: settings.apiKey,
-      timeoutMs: settings.timeoutMs,
-      allowedClassifications: settings.allowedClassifications,
-      structuredOutput: settings.structuredOutput,
-      ...(settings.maxRequestBytes === undefined ? {} : { maxRequestBytes: settings.maxRequestBytes }),
-      ...(settings.maxResponseBytes === undefined ? {} : { maxResponseBytes: settings.maxResponseBytes }),
-    },
-    dependencies,
-  );
-}
-
-/**
- * One entry point for every supported provider:
- *   { type: "groq", apiKey, model?, allowedClassifications, ... }             see createGroqProvider (model defaults to GROQ_DEFAULT_MODEL)
- *   { type: "openai-compatible", id, kind, baseUrl, model, timeoutMs, ... }   any other OpenAI-compatible server,
- *                                                                             under the endpoint policy
- * @param {{ type: "groq" | "openai-compatible" } & Record<string, unknown>} config
- * @param {{ fetch?: typeof fetch, now?: () => number }} [dependencies]
- * @returns {ChatProvider}
- */
-export function createProvider(config, dependencies = {}) {
-  if (typeof config !== "object" || config === null || !PROVIDER_TYPES.includes(config.type)) {
-    throw new AiServiceError(ErrorCodes.CONFIG_INVALID, `Provider type must be one of: ${PROVIDER_TYPES.join(", ")}`);
-  }
-  const { type, ...rest } = config;
-  if (type === PROVIDER_TYPE.GROQ) return createGroqProvider(rest, dependencies);
-  return createOpenAICompatibleProvider(rest, dependencies);
 }

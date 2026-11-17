@@ -37,11 +37,7 @@ import { AiServiceError, ErrorCodes, summarizeZodError } from "./Errors.js";
  * @typedef {RegisteredTask<z.ZodType, z.ZodType>} AnyTask
  */
 
-/**
- * One AI task. A task never has tools and never builds prompt strings from
- * data: it supplies fixed `instructions`, and the orchestrator places the
- * (minimized) input in a delimited, escaped untrusted-data block.
- */
+/** One AI task. */
 
 const definitionSchema = z.object({
   id: taskIdSchema,
@@ -63,10 +59,7 @@ const ALLOWED_KEYS = new Set([...Object.keys(definitionSchema.shape), "inputSche
 
 const definedTasks = new WeakSet();
 
-/**
- * Validates and freezes a task definition. Only tasks created here can be
- * registered, so every task has passed these checks.
- */
+/** Validates and freezes a task definition. */
 export function defineTask(definition) {
   // Unknown keys are refused rather than ignored, so a definition such as
   // `{ tools: [...] }` fails loudly instead of appearing to configure tools.
@@ -91,8 +84,6 @@ export function defineTask(definition) {
   let outputJsonSchema;
   try {
     // The model produces the schema's input side, so generate from "input".
-    // Zod adds a top-level "$schema" dialect URI. It is metadata only, providers'
-    // structured-output modes do not document it, so it is not sent.
     const generated = { ...z.toJSONSchema(definition.outputSchema, { io: "input" }) };
     outputJsonSchema = Object.fromEntries(Object.entries(generated).filter(([keyword]) => keyword !== "$schema"));
   } catch (error) {
@@ -106,11 +97,7 @@ export function defineTask(definition) {
       details: { taskId: definition.id },
     });
   }
-  // Every object in the output must be strict (z.strictObject). A plain
-  // z.object would silently strip unexpected keys instead of rejecting them,
-  // and its JSON Schema would not tell the model that extra keys are invalid.
-  // The schema is refused rather than rewritten, so task schemas never change
-  // behind the author's back.
+  // Every object in the output must be strict (z.strictObject).
   const looseObjectPath = findNonStrictObject(outputJsonSchema, "(root)");
   if (looseObjectPath !== undefined) {
     throw new AiServiceError(ErrorCodes.CONFIG_INVALID, "Task output objects must be strict (use z.strictObject)", {

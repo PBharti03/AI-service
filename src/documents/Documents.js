@@ -1,23 +1,12 @@
 import { z } from "zod";
-import { assertProfileMatchesContext, isApplicationProfile } from "../copilot/Assistant.js";
+import { assertProfileMatchesContext, isApplicationProfile } from "../assistant/Assistant.js";
 import { parseTrustedContext } from "../core/Context.js";
 import { AiServiceError, ErrorCodes, summarizeZodError } from "../core/Errors.js";
 import { defineTask } from "../core/Tasks.js";
-import { MAX_PASSAGE_CHARS } from "../constants/Constants.js";
-import { DATA_CLASSIFICATION, DOCUMENT_ANSWER_TASK_ID } from "../constants/Enums.js";
-export { MAX_PASSAGE_CHARS } from "../constants/Constants.js";
-export { DOCUMENT_ANSWER_TASK_ID } from "../constants/Enums.js";
+import { MAX_PASSAGE_CHARS } from "../constants/DocumentConstants.js";
+import { DATA_CLASSIFICATION } from "../enums/DataClassification.js";
 
-/**
- * Generic document-store contract. The consumer owns storage, retrieval and authorization: it receives
- * the frozen trusted context (application, tenant, actor, permissions) and returns only passages that
- * request may see. The package assumes no filesystem, database or metadata scheme; it validates what
- * the source returns and never sends more than the passages it was given to the model.
- *
- *   count({ context })                               how many documents the context can use (0 = none)
- *   retrieve({ question, context, limit, signal })   the best passages for a question, at most `limit`
- */
-
+/** Generic document-store contract. */
 
 const passageSchema = z.strictObject({
   documentId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/),
@@ -111,11 +100,7 @@ export function createIndexDocumentSource({ loadIndex, minCoverage = 0.5 } = {})
   });
 }
 
-/**
- * Keyword search over an application's documents (BM25), in plain JavaScript with no external service.
- * Documents are split into overlapping passages; a question is matched against the passages' words.
- * The index is a plain JSON object, so an application can store it anywhere (see FolderDocumentStore).
- */
+/** Keyword search over an application's documents (BM25), in plain JavaScript with no external service. */
 
 const STOPWORDS = new Set(
   `a about above after again all am an and any are as at be been before being below between both but by can could did do
@@ -309,10 +294,9 @@ const MAX_PASSAGES = 8;
 
 /**
  * Answers a question from passages of the application's own documents, as its document source supplied them.
- * The model may use only the passages; it must cite them, and say so when they do not answer the question.
  */
 export const DOCUMENT_ANSWER_TASK = defineTask({
-  id: DOCUMENT_ANSWER_TASK_ID,
+  id: "documents.answer",
   version: 2,
   promptVersion: "v2",
   description: "Answer a question using only passages from the application's documents",
@@ -394,8 +378,8 @@ export const DOCUMENT_ANSWER_TASK = defineTask({
  * Passages come from `source` (see defineDocumentSource): the consumer retrieves and authorises them for
  * the request's context. `store` (an object with loadIndex(applicationId), such as the folder store) is
  * still accepted and is read through the local search index.
- * Register DOCUMENT_ANSWER_TASK with the AI service and permit DOCUMENT_ANSWER_TASK_ID in the context.
- * @param {{ ai: import("../core/AiService.js").AiService, profile: import("../copilot/Assistant.js").ApplicationProfile, source?: ReturnType<typeof defineDocumentSource> | Parameters<typeof defineDocumentSource>[0], store?: { loadIndex: (applicationId: string) => Promise<unknown> }, maxPassages?: number, minCoverage?: number }} options
+ * Register DOCUMENT_ANSWER_TASK with the AI service and permit DOCUMENT_ANSWER_TASK.id in the context.
+ * @param {{ ai: import("../core/AiService.js").AiService, profile: import("../assistant/Assistant.js").ApplicationProfile, source?: ReturnType<typeof defineDocumentSource> | Parameters<typeof defineDocumentSource>[0], store?: { loadIndex: (applicationId: string) => Promise<unknown> }, maxPassages?: number, minCoverage?: number }} options
  * @returns {DocumentQaAgent}
  */
 export function createDocumentQaAgent({ ai, store, source, profile, maxPassages = 5, minCoverage = 0.5 }) {

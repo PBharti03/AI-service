@@ -3,26 +3,17 @@ import { EMPTY_TOKEN_USAGE } from "../core/AiService.js";
 import { assertAuthorized, checkRequirement } from "../core/Context.js";
 import { AiServiceError, ErrorCodes, summarizeZodError } from "../core/Errors.js";
 import { defineTask } from "../core/Tasks.js";
-import { buildSchemaContext, checkQueryResult, describePolicyRules, isSqlPolicy, SQL_DIALECTS } from "../sql/SqlPolicy.js";
+import { buildSchemaContext, checkQueryResult, describePolicyRules, isSqlPolicy } from "../sql/SqlPolicy.js";
+import { SQL_DIALECTS } from "../constants/SqlConstants.js";
 import { buildResultChart, mergeSections, observeSection } from "./Results.js";
-import { ANALYTICS_PLAN_TASK_ID, CHART_HINTS, DATA_CLASSIFICATION } from "../constants/Enums.js";
-import { ANALYTICS_LIMITS, MAX_PLAN_CONVERSATION_TURNS, MAX_PLAN_QUERIES, MAX_QUESTION_CHARS } from "../constants/Constants.js";
-export { ANALYTICS_PLAN_TASK_ID, CHART_HINTS } from "../constants/Enums.js";
-export { ANALYTICS_LIMITS, MAX_PLAN_CONVERSATION_TURNS, MAX_PLAN_QUERIES, MAX_QUESTION_CHARS } from "../constants/Constants.js";
+import { createDeadline } from "../core/Deadline.js";
+import { CHART_TYPES } from "../enums/ChartType.js";
+import { DATA_CLASSIFICATION } from "../enums/DataClassification.js";
+import { ANALYTICS_LIMITS, MAX_PLAN_CONVERSATION_TURNS, MAX_PLAN_QUERIES, MAX_QUESTION_CHARS } from "../constants/AnalyticsConstants.js";
 
-/**
- * The application's description of its analytics, used to guide planning and to label results. It
- * carries no access rights: which tables, columns and values may be queried is decided by the SQL policy
- * behind the application's validator (defineSqlPolicy), and nothing here can widen it.
- *
- *   metrics        named measures with a short description (for example "orders: count(*) FROM orders")
- *   dimensions     named breakdowns (for example "channel", "month")
- *   limitations    what the data cannot answer; the planner reports such parts as unanswered
- *   labels         display names for result columns (alias -> label)
- *   valueLabels    display names for category values (value -> label)
- *   locale         number formatting, for example "en-US"
- *   smallSampleBelow  totals below this get a small-numbers caution
- */
+const CHART_HINTS = Object.freeze(["none", "table", ...CHART_TYPES]);
+
+/** The application's description of its analytics, used to guide planning and to label results. */
 
 const vocabularySchema = z
   .array(z.strictObject({ name: z.string().trim().min(1).max(60), description: z.string().trim().min(1).max(200) }))
@@ -140,14 +131,9 @@ const outputSchema = z.strictObject({
     .max(MAX_PLAN_QUERIES),
 });
 
-/**
- * Plans 1-4 independent read-only queries for one analytics question. The model sees only the question,
- * today's date, the policy-filtered schema, the application's metric and dimension names, its stated
- * limitations and earlier SQL: never query results. Every planned statement is validated by the
- * application's SQL validator before anything runs (see createAnalyticsAssistant).
- */
+/** Plans 1-4 independent read-only queries for one analytics question. */
 export const ANALYTICS_PLAN_TASK = defineTask({
-  id: ANALYTICS_PLAN_TASK_ID,
+  id: "analytics.plan",
   version: 1,
   promptVersion: "v1",
   description: "Plan up to four independent read-only SQL queries that answer one analytics question",
@@ -368,17 +354,18 @@ export function createAnalyticsAssistant(options) {
 
     /** Runs the planner within the remaining time; null when the deadline passed. */
     async function plan() {
-      const deadline = AbortSignal.timeout(Math.max(1, remaining()));
-      const signal = request.signal === undefined ? deadline : AbortSignal.any([deadline, request.signal]);
+      const deadline = createDeadline(Math.max(1, remaining()), request.signal);
       try {
-        const result = await ai.runTask(ANALYTICS_PLAN_TASK, request.context, input, { signal });
+        const result = await ai.runTask(ANALYTICS_PLAN_TASK, request.context, input, { signal: deadline.signal });
         usage = addUsage(usage, result.usage);
         model = result.meta.model;
         containsInstructionsToAI ||= result.output.containsInstructionsToAI;
         return result.output;
       } catch (error) {
-        if (deadline.aborted && !request.signal?.aborted) return null;
+        if (deadline.expired() && !request.signal?.aborted) return null;
         throw error;
+      } finally {
+        deadline.dispose();
       }
     }
 

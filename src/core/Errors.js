@@ -1,6 +1,5 @@
 import { z } from "zod";
-import { AI_BUSY_MESSAGE } from "../constants/Constants.js";
-export { AI_BUSY_MESSAGE } from "../constants/Constants.js";
+import { AI_BUSY_MESSAGE } from "../constants/ProviderConstants.js";
 
 /** Every code an AiServiceError can carry. */
 export const ErrorCodes = {
@@ -34,16 +33,12 @@ export const ErrorCodes = {
 
 /**
  * What kind of failure a code is, so consumers can map errors to responses without listing codes:
- *   configuration  the consumer's setup is invalid (fix the code or config; never retried)
- *   context        the trusted context is malformed
- *   authorization  the context does not permit this (task, permission, feature or data classification)
- *   validation     the request or tool input is invalid
- *   provider       the model provider failed or returned something unusable
- *   rate_limit     the provider's rate limit was reached (retry later)
- *   output         the model's output failed validation
- *   execution      a consumer-supplied executor (tool, document source) failed or returned invalid data
- *   cancelled      the caller cancelled
- *   internal       a bug or an unexpected failure
+ * configuration the consumer's setup is invalid (fix the code or config; never retried) context the trusted
+ * context is malformed authorization the context does not permit this (task, permission, feature or data
+ * classification) validation the request or tool input is invalid provider the model provider failed or
+ * returned something unusable rate_limit the provider's rate limit was reached (retry later) output the
+ * model's output failed validation execution a consumer-supplied executor (tool, document source) failed or
+ * returned invalid data cancelled the caller cancelled internal a bug or an unexpected failure
  */
 export const ErrorCategories = Object.freeze({
   CONFIG_INVALID: "configuration",
@@ -96,26 +91,12 @@ export const ErrorCategories = Object.freeze({
  * @property {string} [code]
  */
 
-/**
- * What remains of an underlying error. Raw errors are never retained because
- * their messages can quote secrets or content: a header error quotes the
- * header value, a JSON SyntaxError quotes the parsed text, and errors thrown
- * by application hooks can contain anything.
- */
+/** What remains of an underlying error. */
 
 const SAFE_NAME = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
 const SAFE_CODE = /^[A-Z][A-Z0-9_]{0,63}$/;
 
-/**
- * The only error type the package throws.
- *
- * `message`, `details` and `cause` are built by this package from metadata
- * only (codes, counts, HTTP status, schema-declared paths, error type names),
- * so the error can be logged or inspected without exposing prompts, model
- * output, provider response bodies or credentials. This holds for errors the
- * package creates; an AiServiceError constructed by application code carries
- * whatever that code put in it.
- */
+/** The only error type the package throws. */
 export class AiServiceError extends Error {
   code;
   retryable;
@@ -145,8 +126,8 @@ export function toAiServiceError(error) {
 }
 
 /**
- * Returns a well-formed system error code (for example ECONNREFUSED or
- * UND_ERR_SOCKET) from the error or its direct cause, or undefined.
+ * Returns a well-formed system error code (for example ECONNREFUSED or UND_ERR_SOCKET) from the error or its
+ * direct cause, or undefined.
  */
 export function systemErrorCode(error) {
   for (const candidate of [error, causeOf(error)]) {
@@ -173,10 +154,7 @@ function toSafeCause(cause) {
   return Object.freeze(code === undefined ? { name } : { name, code });
 }
 
-/**
- * The category of an error (see ErrorCategories): "rate_limit", "authorization", "provider" ... and
- * "internal" for anything that is not an AiServiceError.
- */
+/** The category of an error (see ErrorCategories): "rate_limit", "authorization", "provider" ... */
 export function errorCategory(error) {
   return error instanceof AiServiceError && Object.hasOwn(ErrorCategories, error.code) ? ErrorCategories[error.code] : "internal";
 }
@@ -207,14 +185,7 @@ export const REDACTED_SEGMENT = "*";
 
 const declaredKeysCache = new WeakMap();
 
-/**
- * Reduces a ZodError to issue counts, codes and paths that are safe to log.
- *
- * Received values are never included. Path segments are kept only when they
- * are array indices or property names declared by the schema; any other key
- * (for example a key of a z.record, which comes from the data) is replaced
- * with "*".
- */
+/** Reduces a ZodError to issue counts, codes and paths that are safe to log. */
 export function summarizeZodError(error, schema) {
   const declared = declaredKeys(schema);
   const paths = error.issues

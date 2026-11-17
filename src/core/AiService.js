@@ -4,9 +4,8 @@ import { classificationRank, dataClassificationSchema, parseTrustedContext } fro
 import { AiServiceError, createCancelledError, ErrorCodes, rateLimitInfo, summarizeZodError, toAiServiceError } from "./Errors.js";
 import { createTaskRegistry, isRegisteredTask } from "./Tasks.js";
 import { createProvider } from "../providers/Providers.js";
-import { AI_PROVIDER_CONFIG, MAX_OUTPUT_CHARS, RATE_LIMIT_COOLDOWN_MAX_MS, RATE_LIMIT_COOLDOWN_UNKNOWN_MS } from "../constants/Constants.js";
-export { AI_PROVIDER_CONFIG, MAX_OUTPUT_CHARS } from "../constants/Constants.js";
-
+import { AI_PROVIDER_CONFIG, MAX_OUTPUT_CHARS, RATE_LIMIT_COOLDOWN_MAX_MS, RATE_LIMIT_COOLDOWN_UNKNOWN_MS } from "../constants/ProviderConstants.js";
+export { AI_PROVIDER_CONFIG, MAX_OUTPUT_CHARS } from "../constants/ProviderConstants.js";
 
 /**
  * @typedef {Object} AiServiceOptions
@@ -14,7 +13,6 @@ export { AI_PROVIDER_CONFIG, MAX_OUTPUT_CHARS } from "../constants/Constants.js"
  * @property {TaskRegistry} registry
  * @property {AiLogger} [logger]
  * @property {RetryPolicyInput} [retry]
- * @property {boolean} [allowPaidProvider] - Must be true to use a provider whose kind is PAID. Off by default.
  * @property {() => number} [now]
  * @property {(data: unknown, context: TrustedContext) => unknown} [redact] - Application-wide redaction applied after task minimization, before data reaches the prompt. Receives a frozen context.
  * @property {(record: UsageRecord) => Promise<void> | void} [onUsage] - Called once per task with a metadata-only record, on success and on failure. - Success: if this throws or rejects, the task fails with USAGE_RECORDING_FAILED and the output is not returned, because metering is mandatory. - Failure: if this throws, the task's own error is still the one thrown; the metering failure is reported to the logger.
@@ -52,7 +50,6 @@ export { AI_PROVIDER_CONFIG, MAX_OUTPUT_CHARS } from "../constants/Constants.js"
 
 const providerInfoSchema = z.object({
   id: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
-  kind: z.enum(["SELF_HOSTED", "PAID"]),
   model: z.string().min(1).max(200),
   modelRevision: z.string().min(1).max(200).nullable(),
   allowedClassifications: z.array(dataClassificationSchema).min(1),
@@ -60,15 +57,8 @@ const providerInfoSchema = z.object({
 });
 
 export function createAiService(options) {
-  // providerInfo is a validated, frozen snapshot taken once. Every policy
-  // decision and report uses it, never provider.info, which a custom provider
-  // could change later.
+  // providerInfo is a validated, frozen snapshot taken once.
   const { provider, providerInfo } = validateProvider(options.provider);
-  if (providerInfo.kind === "PAID" && options.allowPaidProvider !== true) {
-    throw new AiServiceError(ErrorCodes.CONFIG_INVALID, "Paid providers require allowPaidProvider: true", {
-      details: { providerId: providerInfo.id },
-    });
-  }
   const retryResult = retryPolicySchema.safeParse(options.retry ?? {});
   if (!retryResult.success) {
     throw new AiServiceError(ErrorCodes.CONFIG_INVALID, "Retry policy is invalid", {
@@ -83,11 +73,7 @@ export function createAiService(options) {
   // After a 429, calls fail at once without reaching the provider until its Retry-After has passed.
   let rateLimitedUntil = 0;
 
-  /**
-   * Logging is best-effort: a logger that throws must not replace the task's
-   * result or error. There is nowhere safe left to report the logger's own
-   * failure, so it is dropped here deliberately.
-   */
+  /** Logging is best-effort: a logger that throws must not replace the task's result or error. */
   function log(level, message, meta) {
     try {
       logger[level](message, meta);
@@ -240,7 +226,6 @@ export function createAiService(options) {
     return {
       applicationId: context.applicationId,
       tenantId: context.tenantId,
-      actorType: context.actor.type,
       userId: context.actor.userId,
       requestId: context.requestId,
       taskId: task.id,
@@ -279,11 +264,7 @@ function toTaskUsage(state, elapsedMs) {
   return { ...state.tokens, latencyMs: Math.max(0, elapsedMs), attempts: state.attempts };
 }
 
-/**
- * Checks the provider contract and takes a frozen copy of its info. Zod
- * returns new objects and arrays, so later changes to the provider's own info
- * (or to an array it shares with application config) cannot affect the copy.
- */
+/** Checks the provider contract and takes a frozen copy of its info. */
 function validateProvider(candidate) {
   const provider = candidate;
   const info = providerInfoSchema.safeParse(provider?.info);
@@ -301,12 +282,7 @@ function validateProvider(candidate) {
  * @typedef {(delayMs: number, signal: AbortSignal | undefined) => Promise<void>} Wait
  */
 
-/**
- * Retries are off by default. Queue workers (BullMQ) already retry whole jobs;
- * retrying here as well would multiply load on a busy inference server.
- * When enabled, only errors marked retryable (timeouts, 408/429/5xx,
- * connection failures) are retried; invalid output never is.
- */
+/** Retries are off by default. */
 export const retryPolicySchema = z.strictObject({
   maxRetries: z.number().int().min(0).max(3).default(0),
   baseDelayMs: z.number().int().min(0).max(30_000).default(500),
@@ -382,11 +358,7 @@ async function abortableWait(delayMs, signal) {
  * @property {(message: string, meta?: LogMeta) => void} error
  */
 
-/**
- * Injected logger. The signature matches b2y-logger / winston (message, meta).
- * The package only ever passes metadata: identifiers, codes, counts and
- * timings. Prompt text, task input and model output are never logged.
- */
+/** Injected logger. */
 
 export const noopLogger = Object.freeze({
   debug: () => undefined,
@@ -415,7 +387,6 @@ export const noopLogger = Object.freeze({
  * @typedef {Object} UsageRecord
  * @property {string} applicationId
  * @property {string} tenantId
- * @property {"USER" | "SYSTEM"} actorType - an ACTOR_TYPE
  * @property {string} userId
  * @property {string} requestId
  * @property {string} taskId
@@ -438,11 +409,9 @@ export const EMPTY_TOKEN_USAGE = Object.freeze({
   totalTokens: null,
 });
 
-
 /**
- * Fail-closed parsing of model output: only a complete ("stop") response
- * consisting of exactly one JSON document that satisfies the schema is
- * accepted. No repair, no extraction from Markdown fences, no partial results.
+ * Fail-closed parsing of model output: only a complete ("stop") response consisting of exactly one JSON
+ * document that satisfies the schema is accepted.
  */
 export function parseStructuredOutput(content, schema, finishReason) {
   if (finishReason !== "stop") {
@@ -488,11 +457,7 @@ export function composeSystemPrompt(instructions, outputJsonSchema) {
   return `${BASE_RULES}\n\nTask instructions:\n${instructions}\n\nRequired output JSON schema:\n${JSON.stringify(outputJsonSchema)}`;
 }
 
-/**
- * User message carrying task data. The data is JSON-encoded and `<`, `>`, `&`
- * and line/paragraph separators are \u-escaped, so text inside a user's note
- * cannot close the untrusted_data block or impersonate the surrounding prompt.
- */
+/** User message carrying task data. */
 export function frameUntrustedData(label, data) {
   // JSON.stringify returns undefined at runtime for undefined, functions and symbols despite its declared type.
   let json;
@@ -536,11 +501,10 @@ export function assertProviderAcceptsClassification(provider, actual) {
  */
 export function createDefaultAiService({ apiKey, tasks, logger, onUsage, fetch }) {
   if (typeof apiKey !== "string" || apiKey.trim() === "") throw new AiServiceError(ErrorCodes.CONFIG_INVALID, "createDefaultAiService needs the provider API key");
-  const { type, model, allowedClassifications, paid, invalidOutputRetries } = AI_PROVIDER_CONFIG;
+  const { invalidOutputRetries, allowedClassifications, ...provider } = AI_PROVIDER_CONFIG;
   return createAiService({
-    provider: createProvider({ type, apiKey, model, allowedClassifications: [...allowedClassifications] }, fetch ? { fetch } : {}),
+    provider: createProvider({ ...provider, apiKey, allowedClassifications: [...allowedClassifications] }, fetch ? { fetch } : {}),
     registry: createTaskRegistry(tasks),
-    allowPaidProvider: paid,
     retry: { invalidOutputRetries },
     ...(logger ? { logger } : {}),
     ...(onUsage ? { onUsage } : {}),

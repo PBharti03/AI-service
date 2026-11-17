@@ -8,10 +8,7 @@ import { brandValidatedQuery, isSqlPolicy, reject, relationshipKey, SqlValidatio
  * @typedef {Readonly<Record<string, unknown>>} Json
  */
 
-/**
- * Small, type-safe accessors over the JSON parse tree from libpg-query. Every node is an object with a
- * single key naming its type ({ "SelectStmt": { ... } }); lists are plain arrays.
- */
+/** Small, type-safe accessors over the JSON parse tree from libpg-query. */
 
 export function asObject(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value : undefined;
@@ -89,13 +86,12 @@ export function treeSize(root) {
 }
 
 /**
- * Checks on the raw text before parsing, for things the parse tree no longer shows:
- *   - comments (-- and slash-star), which can hide text from reviewers and from the appended LIMIT
- *   - dollar quoting and $n parameters (the package adds its own parameters)
- *   - prefixed string literals (E'', U&'', B'', X'', N''), whose escapes make offset-based rewriting unsafe
- *   - a semicolon anywhere except one trailing statement terminator
- *   - control characters other than tab, line feed and carriage return
- * Returns the statement without its trailing semicolon, or a rejection.
+ * Checks on the raw text before parsing, for things the parse tree no longer shows: - comments (-- and slash-
+ * star), which can hide text from reviewers and from the appended LIMIT - dollar quoting and $n parameters
+ * (the package adds its own parameters) - prefixed string literals (E'', U&'', B'', X'', N''), whose escapes
+ * make offset-based rewriting unsafe - a semicolon anywhere except one trailing statement terminator -
+ * control characters other than tab, line feed and carriage return Returns the statement without its trailing
+ * semicolon, or a rejection.
  */
 export function lexicalCheck(sql, maxChars, allowParams = false) {
   const trimmed = sql.trim();
@@ -180,12 +176,7 @@ export function lexicalCheck(sql, maxChars, allowParams = false) {
  * @property {boolean} allowParams - The rewritten statement may contain $n parameters (and no longer contains liftable literals).
  */
 
-/**
- * Allow-list walk over one PostgreSQL SELECT parse tree. Every node type, function, operator, type cast,
- * table and column must be explicitly allowed; anything unrecognised is refused. The checker never
- * executes or rewrites anything: it reports the tables and columns read, the literals that may become
- * bind parameters, and the top-level LIMIT.
- */
+/** Allow-list walk over one PostgreSQL SELECT parse tree. */
 export class StatementRejected extends Error {
   code;
   reason;
@@ -251,7 +242,6 @@ export function checkStatement(select, policy, options) {
   const literals = [];
   const paramRefs = new Set();
 
-  // ── Sources and scopes ────────────────────────────────────────────────────
   function findCte(scope, name) {
     for (let current = scope; current !== null; current = current.parent) {
       const cte = current.ctes.get(name);
@@ -356,11 +346,7 @@ export function checkStatement(select, policy, options) {
     }
   }
 
-  // ── Columns ───────────────────────────────────────────────────────────────
-  /**
-   * Resolves a ColumnRef to an allowed table column (returned) or a derived column (null). Output-column
-   * aliases are only honoured by the caller for bare ORDER BY keys, matching PostgreSQL's own rules.
-   */
+  /** Resolves a ColumnRef to an allowed table column (returned) or a derived column (null). */
   function columnRef(value, scope, clause) {
     const node = nodeOf(value);
     if (node?.[0] !== "ColumnRef") fail(SqlValidationCodes.SQL_JOIN_NOT_ALLOWED, `Expected a column in ${clause}`);
@@ -401,7 +387,6 @@ export function checkStatement(select, policy, options) {
     );
   }
 
-  // ── Literals ──────────────────────────────────────────────────────────────
   function constValue(body) {
     if (body.isnull === true) return { kind: "null", value: null };
     const sval = asObject(body.sval);
@@ -441,9 +426,9 @@ export function checkStatement(select, policy, options) {
   }
 
   /**
-   * A constant compared with a table column: its type must suit the column (or the cast applied to it),
-   * an equality on a column with allowedValues must use one of them, and string and number constants
-   * become bind parameters.
+   * A constant compared with a table column: its type must suit the column (or the cast applied to it), an
+   * equality on a column with allowedValues must use one of them, and string and number constants become bind
+   * parameters.
    */
   function comparedLiteral(value, column, operator) {
     let node = nodeOf(value);
@@ -488,7 +473,6 @@ export function checkStatement(select, policy, options) {
     return mapped;
   }
 
-  // ── Expressions ───────────────────────────────────────────────────────────
   function expression(value, scope, clause) {
     const node = nodeOf(value);
     if (node === undefined) fail(SqlValidationCodes.SQL_FEATURE_NOT_ALLOWED, `Unsupported expression in ${clause}`);
@@ -687,7 +671,6 @@ export function checkStatement(select, policy, options) {
     expression(key, scope, "ORDER BY");
   }
 
-  // ── SELECT ────────────────────────────────────────────────────────────────
   function outputName(target) {
     const name = asString(target.name);
     if (name !== undefined) return name;
@@ -705,11 +688,7 @@ export function checkStatement(select, policy, options) {
     return number;
   }
 
-  /**
-   * Checks one SELECT and returns its output column names. `parent` is the enclosing scope (outer FROM
-   * sources and WITH names). `top` marks the statement whose output is returned (aggregation rule);
-   * `outermost` the one whose LIMIT is enforced.
-   */
+  /** Checks one SELECT and returns its output column names. */
   function selectStmt(body, parent, top, outermost) {
     if (body.intoClause !== undefined) fail(SqlValidationCodes.SQL_FEATURE_NOT_ALLOWED, "SELECT INTO is not allowed");
     if (asArray(body.lockingClause).length > 0)
@@ -817,7 +796,6 @@ export function checkStatement(select, policy, options) {
     if (outermost && count !== undefined) topLimit = { value: count, location: locationOf(nodeOf(body.limitCount)?.[1] ?? {}) };
   }
 
-  // ── Aggregation ───────────────────────────────────────────────────────────
   function containsAggregate(value) {
     const node = nodeOf(value);
     if (node?.[0] === "FuncCall") {
@@ -900,8 +878,7 @@ async function parseAndCheck(sql, policy, allowParams) {
 
 /**
  * Rewrites the statement text at the parser's byte offsets: liftable literals become $1..$n (numbered in
- * source order) and the top-level LIMIT is added or lowered to maxRows + 1. Returns undefined if a
- * literal is not found exactly where the parser put it, so the caller fails closed.
+ * source order) and the top-level LIMIT is added or lowered to maxRows + 1.
  */
 function rewrite(sql, check, maxRows) {
   const bytes = Buffer.from(sql, "utf8");
@@ -956,11 +933,7 @@ function sameSet(a, b) {
   return a.size === b.size && [...a].every((value) => b.has(value));
 }
 
-/**
- * PostgreSQL validator for one policy (see defineSqlPolicy). It parses with PostgreSQL's own grammar
- * (libpg-query), walks the tree against the policy's allow-lists, rewrites the statement, and then parses
- * and checks the rewritten text again, so what is returned is exactly what was validated.
- */
+/** PostgreSQL validator for one policy (see defineSqlPolicy). */
 export function createPostgresSqlValidator(policy) {
   // dialect is checked at runtime: the policy may come from untyped JavaScript.
   if (!isSqlPolicy(policy) || policy.dialect !== "postgres") {

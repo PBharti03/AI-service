@@ -6,8 +6,8 @@ import { AiServiceError } from "../core/Errors.js";
 import { ErrorCodes } from "../core/Errors.js";
 import { summarizeZodError } from "../core/Errors.js";
 import { buildSearchIndex } from "./Documents.js";
-import { DEFAULT_DOCUMENT_TYPES } from "../constants/Enums.js";
-export { DEFAULT_DOCUMENT_TYPES } from "../constants/Enums.js";
+/** Used when an application passes no documentTypes of its own. */
+const DEFAULT_DOCUMENT_TYPES = Object.freeze(["document", "guide", "reference", "other"]);
 
 const DOCUMENT_TYPE = /^[a-z][a-z0-9_-]{0,19}$/;
 const APPLICATION_ID = /^[a-z][a-z0-9-]{0,63}$/;

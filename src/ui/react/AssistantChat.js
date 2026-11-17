@@ -1,6 +1,8 @@
 import { createElement as h, useCallback, useEffect, useRef, useState } from "react";
-import { ASSISTANT_NAME, ASSISTANT_PATHS, COMPACT_MEDIA_QUERY, PHONE_MEDIA_QUERY, UI_LABELS } from "../../constants/Constants.js";
-export { ASSISTANT_PATHS } from "../../constants/Constants.js";
+import { ASSISTANT_NAME, MAX_MESSAGE_CHARS } from "../../constants/AssistantConstants.js";
+import { ASSISTANT_PATHS } from "../../constants/ServerConstants.js";
+import { COMPACT_MEDIA_QUERY, PHONE_MEDIA_QUERY, UI_LABELS } from "../../constants/UiConstants.js";
+export { ASSISTANT_PATHS } from "../../constants/ServerConstants.js";
 
 export { ASSISTANT_NAME };
 
@@ -19,7 +21,7 @@ const toViewMessages = (loaded) => (Array.isArray(loaded) ? loaded : []).filter(
 const icon = (paths, size = 16) => h("svg", { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true", focusable: "false" }, ...paths.map((d, index) => h("path", { key: index, d })));
 /**
  * Beya's icon, the same in every application: a friendly line-style bot (outline in the text colour, teal
- * antenna, ears and signal). Parts are grouped so the launcher can animate them (tilt, blink, signal pulse).
+ * antenna, ears and signal).
  */
 const BOT = Object.freeze({
   outline: ["M8.5 8.2h7a3 3 0 0 1 3 3v2a3 3 0 0 1-3 3h-7a3 3 0 0 1-3-3v-2a3 3 0 0 1 3-3z", "M6.6 21.6a5.4 3.9 0 0 1 10.8 0z"],
@@ -238,7 +240,7 @@ export async function restoreConversation({ conversationId, loadConversation, li
  *   maxLength?: number, className?: string, style?: object,
  * }} props
  */
-export function AssistantChat({ send, loadConversation, listConversations, conversationId: initialConversationId, onConversationChange, title, intro, suggestions = [], labels: labelOverrides = {}, maxLength = 4000, className = "", style, onOpenLink, avatar, variant = "panel" }) {
+export function AssistantChat({ send, loadConversation, listConversations, conversationId: initialConversationId, onConversationChange, title, intro, suggestions = [], labels: labelOverrides = {}, maxLength = MAX_MESSAGE_CHARS, className = "", style, onOpenLink, avatar, variant = "panel" }) {
   const labels = { ...DEFAULT_LABELS, ...labelOverrides };
   const page = variant === "page";
   const [sidebarOpen, setSidebarOpen] = useState(() => !globalThis.matchMedia?.(PHONE_MEDIA_QUERY).matches);

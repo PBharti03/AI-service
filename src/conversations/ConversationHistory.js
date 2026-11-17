@@ -3,14 +3,10 @@ import { z } from "zod";
 import { parseTrustedContext } from "../core/Context.js";
 import { AiServiceError } from "../core/Errors.js";
 import { ErrorCodes } from "../core/Errors.js";
-import { responseBlocksSchema } from "../copilot/Capabilities.js";
-import { APP_DATA_MAX_BYTES, DEFAULT_RETENTION_DAYS, MAX_RETENTION_DAYS, MIN_RETENTION_DAYS } from "../constants/Constants.js";
-export { APP_DATA_MAX_BYTES, DEFAULT_RETENTION_DAYS, MAX_RETENTION_DAYS } from "../constants/Constants.js";
+import { responseBlocksSchema } from "../assistant/Capabilities.js";
+import { APP_DATA_MAX_BYTES, DEFAULT_RETENTION_DAYS, MAX_RETENTION_DAYS, MIN_RETENTION_DAYS } from "../constants/ConversationConstants.js";
 
-/**
- * Conversation history scoped by the trusted context (application, tenant, user). Data-based answers are
- * never shown to the model again; no credentials, tokens or grants are stored.
- */
+/** Conversation history scoped by the trusted context (application, tenant, user). */
 
 const DAY_MS = 86_400_000;
 const CONVERSATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -35,15 +31,7 @@ export const conversationMessageSchema = z.strictObject({
 const STORE_METHODS = ["appendMessage", "listMessages", "listConversations", "deleteConversation", "deleteInactiveSince"];
 const stores = new WeakSet();
 
-/**
- * Wraps a consumer's storage. Each method gets the scope { applicationId, tenantId, userId } and must
- * return only that scope's records; the history manager checks the scope of everything returned again.
- *   appendMessage(message)                                 store one message (and bump the conversation's activity)
- *   listMessages({ scope, conversationId, limit })         messages, oldest first
- *   listConversations({ scope, limit })                    [{ conversationId, title, updatedAt }], newest first
- *   deleteConversation({ scope, conversationId })          -> boolean
- *   deleteInactiveSince({ cutoff })                        delete conversations whose last message is older -> count
- */
+/** Wraps a consumer's storage. */
 export function defineConversationStore(definition) {
   const missing = STORE_METHODS.filter((name) => typeof definition?.[name] !== "function");
   if (missing.length > 0) throw new AiServiceError(ErrorCodes.CONFIG_INVALID, "A conversation store needs appendMessage, listMessages, listConversations, deleteConversation and deleteInactiveSince", { details: { missing: missing.join(",") } });
@@ -57,47 +45,6 @@ export function isConversationStore(value) {
 }
 
 const sameScope = (record, scope) => record.applicationId === scope.applicationId && record.tenantId === scope.tenantId && record.userId === scope.userId;
-
-/** In-process store: for tests, development and single-instance deployments (lost on restart). */
-export function createMemoryConversationStore() {
-  const conversations = new Map();
-  return defineConversationStore({
-    async appendMessage(message) {
-      const entry = conversations.get(message.conversationId) ?? { scope: { applicationId: message.applicationId, tenantId: message.tenantId, userId: message.userId }, messages: [], updatedAt: message.createdAt };
-      if (!sameScope(message, entry.scope)) throw new AiServiceError(ErrorCodes.NOT_AUTHORIZED, "The conversation belongs to another user");
-      entry.messages.push(structuredClone(message));
-      entry.updatedAt = message.createdAt;
-      conversations.set(message.conversationId, entry);
-    },
-    async listMessages({ scope, conversationId, limit }) {
-      const entry = conversations.get(conversationId);
-      if (!entry || !sameScope(entry.scope, scope)) return [];
-      return entry.messages.slice(-limit).map((message) => structuredClone(message));
-    },
-    async listConversations({ scope, limit }) {
-      return [...conversations.entries()]
-        .filter(([, entry]) => sameScope(entry.scope, scope))
-        .sort(([, a], [, b]) => (a.updatedAt < b.updatedAt ? 1 : -1))
-        .slice(0, limit)
-        .map(([conversationId, entry]) => ({ conversationId, title: (entry.messages.find((message) => message.role === "user")?.text ?? "").slice(0, 80), updatedAt: entry.updatedAt }));
-    },
-    async deleteConversation({ scope, conversationId }) {
-      const entry = conversations.get(conversationId);
-      if (!entry || !sameScope(entry.scope, scope)) return false;
-      return conversations.delete(conversationId);
-    },
-    async deleteInactiveSince({ cutoff }) {
-      let deleted = 0;
-      for (const [conversationId, entry] of conversations) {
-        if (entry.updatedAt < cutoff) {
-          conversations.delete(conversationId);
-          deleted += 1;
-        }
-      }
-      return deleted;
-    },
-  });
-}
 
 /** Plain text of reply blocks, for history (tables and charts are left out). */
 export function blocksToText(blocks) {

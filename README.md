@@ -10,12 +10,12 @@ closed.
 ## Layout
 
 ```
-src/constants     Constants.js (shared settings, provider and model, limits, messages, UI text) and
-                  Enums.js (fixed value sets: provider types, classifications, task ids, chart and SQL types)
+src/constants     shared settings, one file per module (Assistant, Provider, Conversation, Analytics, Document, Server, Sql, Ui)
+src/enums         shared value sets, one file per enum (ChartType, DataClassification)
 src/core          AiService (tasks, retries, rate limits, output validation), Context, Errors, Tasks
-src/providers     Groq and OpenAI-compatible providers, endpoint policy (internal)
+src/providers     the OpenAI-compatible provider client (internal)
 src/server        runtime, HTTP endpoints, rate limiter, read-only SQL runner (subpath ./server)
-src/copilot       createAiAssistant (AI routing), capabilities, response blocks
+src/assistant     createAiAssistant (AI routing), capabilities, response blocks
 src/analytics     multi-query planner, result merging, charts and observations
 src/sql           SQL policy and the PostgreSQL AST validator
 src/documents     document Q&A; folder store and PDF text (subpaths)
@@ -52,15 +52,17 @@ const { conversationId, status, blocks } = await assistant.reply({ message, cont
 
 ## Provider and model
 
-`AI_PROVIDER_CONFIG` (src/core/AiService.js) is the only place that names the provider and model for every
+`AI_PROVIDER_CONFIG` (src/constants/ProviderConstants.js) is the only place that names the provider and model for every
 application; provider helpers are internal, so no application can name one. Applications pass only their API
 key (`createAiRuntime({ apiKey, tasks, conversationsDir })` on the server). To change provider or model, edit
-that configuration and release a new package version.
+that configuration (any OpenAI-compatible API: base URL, model) and add its host to `APPROVED_PROVIDER_HOSTS`,
+then release a new package version.
 
 ## Server (`@b2y/ai-service/server`)
 
 ```js
 const { ai, history } = createAiRuntime({ apiKey, tasks, conversationsDir, retentionDays, logger });
+// limiter is optional: by default 15 messages per user per 10 minutes and 500 per tenant per day.
 const endpoints = createAssistantEndpoints({ resolve: async (req) => ({ assistant, context }) | null, limiter, logger });
 mountAssistantRoutes(router, endpoints); // GET /ai/status, POST /ai/chat, GET /ai/conversations[/:id]
 ```
@@ -89,7 +91,7 @@ conversation call before any history or model access.
 
 ```js
 const context = {
-  applicationId: "ecommerce-admin", tenantId: "t-42", actor: { type: "USER", userId: "u-7" }, requestId: "r-1",
+  applicationId: "ecommerce-admin", tenantId: "t-42", actor: { userId: "u-7" }, requestId: "r-1",
   permittedTasks: ["assistant.route", "assistant.respond", "analytics.plan"],
   dataClassification: "INTERNAL", permissions: ["Order Management:Generate Order Report"], features: ["ACCESS_ORDER"],
 };
@@ -142,11 +144,23 @@ fast without reaching the provider until the wait has passed (at most one minute
 - Only read-only capabilities; the model never chooses tenant, scope or permissions.
 - Untrusted data is JSON-encoded in one `<untrusted_data>` block; output must be a complete JSON document
   matching a strict schema.
-- Paid providers only on approved hosts (`api.groq.com`), HTTPS, no redirects; request and response size
+- The provider only on approved hosts (`api.groq.com`), HTTPS, no redirects; request and response size
   limits and timeouts.
 - Errors and logs carry codes, counts and statuses only, never prompts, output or credentials.
 
-## Install and verify
+## Install
 
-Raise the version, `npm run verify` (lint), `npm pack`, copy the tarball into the consumer's `vendor/` and
-depend on `"@b2y/ai-service": "file:vendor/b2y-ai-service-<version>.tgz"`.
+```bash
+npm install @b2y/ai-service
+```
+
+Peer dependencies, installed by the applications that need them: `react` (chat UI), `libpg-query` (SQL
+validator), `unpdf` (PDF text). Node.js 20.19 or later.
+
+## Release
+
+1. Raise `version` in `package.json` (semantic versioning; the first release is 1.0.0).
+2. `npm ci && npm run verify` locally.
+3. Run the Jenkins job with `ACTION=publish`. It builds the `Dockerfile` (locked install, checks, `npm pack`),
+   archives the package, refuses a version that is already on npm, and publishes with the `npm-publish-token`
+   credential (an npm automation token with publish rights to `@b2y`). `ACTION=verify` stops before publishing.

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { AiServiceError, ErrorCodes, summarizeZodError } from "../core/Errors.js";
-import { SQL_AGGREGATE_FUNCTIONS, SQL_COLUMN_TYPES, SQL_DIALECTS, SQL_SAFE_FUNCTIONS, SQL_SAFE_WINDOW_FUNCTIONS } from "../constants/Enums.js";
-export { SQL_AGGREGATE_FUNCTIONS, SQL_COLUMN_TYPES, SQL_DIALECTS, SQL_SAFE_FUNCTIONS, SQL_SAFE_WINDOW_FUNCTIONS } from "../constants/Enums.js";
+import { SQL_AGGREGATE_FUNCTIONS, SQL_COLUMN_TYPES, SQL_DIALECTS, SQL_SAFE_FUNCTIONS, SQL_SAFE_WINDOW_FUNCTIONS } from "../constants/SqlConstants.js";
+export { SQL_SAFE_FUNCTIONS, SQL_SAFE_WINDOW_FUNCTIONS } from "../constants/SqlConstants.js";
 
 /**
  * @typedef {Object} SqlColumnInfo
@@ -131,10 +131,9 @@ function configError(message, detail) {
 }
 
 /**
- * Validates the schema the model may see and the policy queries must satisfy, and checks them against
- * each other: every allowed table and column must exist in the schema, every allowed function must be in
- * the curated safe list, and every declared relationship must join allowed columns. Throws
- * AiServiceError(CONFIG_INVALID) on any mismatch.
+ * Validates the schema the model may see and the policy queries must satisfy, and checks them against each
+ * other: every allowed table and column must exist in the schema, every allowed function must be in the
+ * curated safe list, and every declared relationship must join allowed columns.
  */
 export function defineSqlPolicy(input) {
   if (!SQL_DIALECTS.includes(input.dialect)) throw configError("Unsupported SQL dialect");
@@ -290,9 +289,8 @@ export function reject(code, reason) {
 }
 
 /**
- * A statement that passed validation and rewriting: user-facing values are bind parameters ($1, $2, ...)
- * and the row limit is enforced. Only this package creates one (see isValidatedQuery); executors should
- * refuse anything else.
+ * A statement that passed validation and rewriting: user-facing values are bind parameters ($1, $2, ...) and
+ * the row limit is enforced.
  */
 
 /** What the agent needs from a dialect validator (for example createPostgresSqlValidator). */
@@ -327,11 +325,8 @@ function oneLine(text) {
 }
 
 /**
- * The only description of the database the model receives, built from the policy rather than the full
- * schema: tables and columns that are not allowed are never mentioned, so the model cannot learn they
- * exist. It lists, per allowed table, each allowed column with its type, role, description and allowed
- * values, then the declared join keys. Output is deterministic (schema order). Throws CONFIG_INVALID when
- * it exceeds the policy's maxSchemaChars, so oversized schemas fail at setup rather than per request.
+ * The only description of the database the model receives, built from the policy rather than the full schema:
+ * tables and columns that are not allowed are never mentioned, so the model cannot learn they exist.
  */
 export function buildSchemaContext(policy) {
   const lines = [];
@@ -423,10 +418,7 @@ function isColumnName(name) {
   return name.length > 0 && name.length <= 128;
 }
 
-/**
- * Normalises one value from a database driver. Only scalars survive: bigint becomes a string and a Date an
- * ISO string; objects, arrays and buffers are refused because an aggregate query never needs them.
- */
+/** Normalises one value from a database driver. */
 function toCell(value) {
   if (value === null || typeof value === "string" || typeof value === "boolean") return value;
   if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
@@ -436,9 +428,9 @@ function toCell(value) {
 }
 
 /**
- * Checks what the application's executor returned before anything is shown or summarised: the declared
- * shape, scalar values only, at most maxResultColumns columns, at most maxRows rows (one extra row means
- * the result was truncated) and at most maxResultBytes of JSON.
+ * Checks what the application's executor returned before anything is shown or summarised: the declared shape,
+ * scalar values only, at most maxResultColumns columns, at most maxRows rows (one extra row means the result
+ * was truncated) and at most maxResultBytes of JSON.
  */
 export function checkQueryResult(result, limits) {
   const candidate = result;

@@ -1,9 +1,29 @@
 {
   "name": "@b2y/ai-service",
-  "version": "1.0.7",
-  "description": "Reusable, application-independent AI assistant for B2Y applications: consumer-supplied context, permissions and capabilities, routing to data, analytics, documents, research or advice, conversation history with retention, provider abstraction and a reusable chat UI.",
-  "private": true,
+  "version": "1.0.0",
+  "description": "Shared AI assistant (Beya) for B2Y applications: global tenant and role/permission access, one provider and model configuration, read-only data, analytics, search and document capabilities, conversation history, server endpoints and a React chat UI and widget.",
+  "keywords": [
+    "b2y",
+    "ai",
+    "assistant",
+    "beya",
+    "text-to-sql",
+    "analytics",
+    "chat"
+  ],
+  "author": "B2Y Infy Solutions",
   "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yuvakrishna29/AI-service.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yuvakrishna29/AI-service/issues"
+  },
+  "homepage": "https://github.com/yuvakrishna29/AI-service#readme",
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "main": "./src/index.js",
   "exports": {
@@ -25,7 +45,8 @@
   },
   "scripts": {
     "lint": "eslint .",
-    "verify": "npm run lint"
+    "verify": "npm run lint",
+    "prepublishOnly": "npm run verify"
   },
   "dependencies": {
     "zod": "4.6.7"

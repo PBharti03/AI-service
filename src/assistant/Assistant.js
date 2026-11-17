@@ -4,12 +4,13 @@ import { blocksToText } from "../conversations/ConversationHistory.js";
 import { EMPTY_TOKEN_USAGE, noopLogger } from "../core/AiService.js";
 import { assertAuthorized, checkRequirement, meetsRequirement } from "../core/Context.js";
 import { AiServiceError, errorCategory, ErrorCodes, summarizeZodError } from "../core/Errors.js";
+import { createDeadline } from "../core/Deadline.js";
 import { defineTask } from "../core/Tasks.js";
-import { ASSISTANT_NAME } from "../constants/Constants.js";
+import { ASSISTANT_NAME } from "../constants/AssistantConstants.js";
 import { capabilityResultSchema, isCapability, isCapabilityGranted, responseBlocksSchema } from "./Capabilities.js";
-import { ASSISTANT_RESPOND_TASK_ID, ASSISTANT_ROUTE_TASK_ID, BUILT_IN_ROUTES, DATA_CLASSIFICATION } from "../constants/Enums.js";
-import { ASSISTANT_TIMEOUT_MS, MAX_MESSAGE_CHARS } from "../constants/Constants.js";
-export { ASSISTANT_RESPOND_TASK_ID, ASSISTANT_ROUTE_TASK_ID, BUILT_IN_ROUTES } from "../constants/Enums.js";
+import { DATA_CLASSIFICATION } from "../enums/DataClassification.js";
+import { ASSISTANT_TIMEOUT_MS, MAX_MESSAGE_CHARS } from "../constants/AssistantConstants.js";
+const BUILT_IN_ROUTES = Object.freeze(["general", "unsupported"]);
 
 /**
  * Who the assistant is speaking for. Each application that uses this package defines one profile in its
@@ -72,19 +73,6 @@ export function isApplicationProfile(value) {
 }
 
 /**
- * The profile as task data: name, description, capabilities and out-of-scope topics only.
- * @param {ApplicationProfile} profile
- */
-export function profileForPrompt(profile) {
-  return {
-    name: profile.name,
-    description: profile.description,
-    capabilities: [...profile.capabilities],
-    outOfScope: [...profile.outOfScope],
-  };
-}
-
-/**
  * Throws unless the request's trusted applicationId is this profile's: an application can only speak
  * as itself, and only read its own documents.
  * @param {ApplicationProfile} profile
@@ -105,7 +93,6 @@ export function assertProfileMatchesContext(profile, context) {
 // The route and respond tasks of createAiAssistant: they see the profile, granted capabilities, the
 // question, model-safe history and shared facts only.
 
-
 const applicationSchema = z.strictObject({
   name: z.string().min(1).max(60),
   assistantName: z.string().min(1).max(40).nullable(),
@@ -122,7 +109,7 @@ const capabilityList = z
 const unavailableList = z.array(z.strictObject({ title: z.string().min(1).max(80), covers: z.string().min(1).max(400), reason: z.enum(["not permitted", "not enabled"]), hint: z.string().max(160).nullable() })).max(20);
 
 export const ASSISTANT_ROUTE_TASK = defineTask({
-  id: ASSISTANT_ROUTE_TASK_ID,
+  id: "assistant.route",
   version: 7,
   promptVersion: "v1",
   description: "Choose how the assistant answers a message: one of the available capabilities, general reasoning or unsupported",
@@ -147,7 +134,7 @@ export const ASSISTANT_ROUTE_TASK = defineTask({
   dataLabel: "assistant message",
   inputSchema: z.strictObject({
     application: applicationSchema,
-    question: z.string().min(1).max(4000),
+    question: z.string().min(1).max(MAX_MESSAGE_CHARS),
     history: historySchema,
     capabilities: capabilityList,
     unavailable: unavailableList,
@@ -171,7 +158,7 @@ const answerBlockSchema = z.strictObject({
 });
 
 export const ASSISTANT_RESPOND_TASK = defineTask({
-  id: ASSISTANT_RESPOND_TASK_ID,
+  id: "assistant.respond",
   version: 8,
   promptVersion: "v1",
   description: "Write the assistant's answer from the question, shared facts and general knowledge",
@@ -213,7 +200,7 @@ export const ASSISTANT_RESPOND_TASK = defineTask({
   dataLabel: "assistant answer request",
   inputSchema: z.strictObject({
     application: applicationSchema,
-    question: z.string().min(1).max(4000),
+    question: z.string().min(1).max(MAX_MESSAGE_CHARS),
     history: historySchema,
     facts: z.array(z.strictObject({ source: z.string().min(1).max(80), items: z.array(z.string().min(1).max(300)).max(20) })).max(4),
     dataResultsShown: z.boolean(),
@@ -236,11 +223,7 @@ export const ASSISTANT_RESPOND_TASK = defineTask({
   maxClassification: DATA_CLASSIFICATION.INTERNAL,
 });
 
-/**
- * The application-agnostic assistant. The model routes each message to a granted capability, general
- * reasoning or unsupported; grants are decided in code from the trusted context, never by the model.
- * Capabilities may keep server-only memory between turns (for example earlier queries for follow-ups).
- */
+/** The application-agnostic assistant. */
 
 const MEMORY_TURNS = 3;
 
@@ -312,15 +295,14 @@ export function createAiAssistant({ ai, profile, capabilities = [], history, req
   };
 
   async function runCapability(capability, call) {
-    const controller = new AbortController();
-    const signal = call.signal ? AbortSignal.any([controller.signal, call.signal]) : controller.signal;
+    const deadline = createDeadline(capability.timeoutMs, call.signal);
     try {
-      const raw = await withTimeout(Promise.resolve().then(() => capability.handle({ ...call, signal })), capability.timeoutMs);
+      const raw = await withTimeout(Promise.resolve().then(() => capability.handle({ ...call, signal: deadline.signal })), capability.timeoutMs);
       const parsed = capabilityResultSchema.safeParse(raw);
       if (!parsed.success) throw new AiServiceError(ErrorCodes.CAPABILITY_FAILED, "The capability returned an invalid result", { details: { capability: capability.id } });
       return { ...parsed.data, facts: capability.shareFacts ? parsed.data.facts : [] };
     } catch (error) {
-      controller.abort();
+      deadline.abort();
       if (mustPropagate(error)) throw error;
       const code = error instanceof DeadlineReached ? ErrorCodes.CAPABILITY_TIMEOUT : error instanceof AiServiceError ? error.code : ErrorCodes.CAPABILITY_FAILED;
       log("warn", "Assistant capability failed", { capability: capability.id, code });
@@ -330,6 +312,8 @@ export function createAiAssistant({ ai, profile, capabilities = [], history, req
         facts: [],
         sources: [],
       };
+    } finally {
+      deadline.dispose();
     }
   }
 
@@ -342,107 +326,111 @@ export function createAiAssistant({ ai, profile, capabilities = [], history, req
     const message = typeof request.message === "string" ? request.message.trim() : "";
     if (message === "" || message.length > MAX_MESSAGE_CHARS) throw new AiServiceError(ErrorCodes.INPUT_INVALID, `A message is 1-${String(MAX_MESSAGE_CHARS)} characters`);
     const started = Date.now();
-    const deadline = AbortSignal.timeout(timeoutMs);
-    const signal = request.signal ? AbortSignal.any([deadline, request.signal]) : deadline;
-    let usage = { ...EMPTY_TOKEN_USAGE, latencyMs: 0, attempts: 0 };
-    let containsInstructionsToAI = false;
-    const runTask = async (task, input) => {
-      const result = await ai.runTask(task, context, input, { signal });
-      usage = addUsage(usage, result.usage);
-      containsInstructionsToAI ||= result.output.containsInstructionsToAI === true;
-      return result.output;
-    };
+    const deadline = createDeadline(timeoutMs, request.signal);
+    const { signal } = deadline;
+    try {
+      let usage = { ...EMPTY_TOKEN_USAGE, latencyMs: 0, attempts: 0 };
+      let containsInstructionsToAI = false;
+      const runTask = async (task, input) => {
+        const result = await ai.runTask(task, context, input, { signal });
+        usage = addUsage(usage, result.usage);
+        containsInstructionsToAI ||= result.output.containsInstructionsToAI === true;
+        return result.output;
+      };
 
-    // Conversation: only this user's, in this tenant and application.
-    let conversationId = request.conversationId;
-    let earlier = [];
-    if (history) {
-      earlier = history.isConversationId(conversationId) ? await history.load({ context, conversationId }) : [];
-      if (earlier.length === 0) conversationId = history.newConversationId();
-    } else if (typeof conversationId !== "string" || !/^[0-9a-f-]{36}$/.test(conversationId)) {
-      conversationId = randomUUID();
-    }
-    const modelHistory = history ? history.forModel(earlier) : [];
+      // Conversation: only this user's, in this tenant and application.
+      let conversationId = request.conversationId;
+      let earlier = [];
+      if (history) {
+        earlier = history.isConversationId(conversationId) ? await history.load({ context, conversationId }) : [];
+        if (earlier.length === 0) conversationId = history.newConversationId();
+      } else if (typeof conversationId !== "string" || !/^[0-9a-f-]{36}$/.test(conversationId)) {
+        conversationId = randomUUID();
+      }
+      const modelHistory = history ? history.forModel(earlier) : [];
 
-    // Authorization is decided here, from the trusted context: the model only sees granted capabilities.
-    const granted = capabilities.filter((capability) => isCapabilityGranted(capability, context));
-    const unavailable = capabilities
-      .filter((capability) => !granted.includes(capability))
-      .map((capability) => ({ title: capability.title, covers: capability.description, reason: meetsRequirement(context, capability.requires).missing === "permission" ? "not permitted" : "not enabled", hint: capability.unavailableHint ?? null }));
-    const byId = new Map(granted.map((capability) => [capability.id, capability]));
-    // What this user can do: their granted capabilities plus the profile's general abilities. Ungranted
-    // capabilities are never described as available (they are listed in unavailable instead).
-    const application = { ...baseApplication, capabilities: [...granted.map((capability) => `${capability.title}: ${capability.description}`.slice(0, 120)), ...baseApplication.capabilities].slice(0, 12) };
+      // Authorization is decided here, from the trusted context: the model only sees granted capabilities.
+      const granted = capabilities.filter((capability) => isCapabilityGranted(capability, context));
+      const unavailable = capabilities
+        .filter((capability) => !granted.includes(capability))
+        .map((capability) => ({ title: capability.title, covers: capability.description, reason: meetsRequirement(context, capability.requires).missing === "permission" ? "not permitted" : "not enabled", hint: capability.unavailableHint ?? null }));
+      const byId = new Map(granted.map((capability) => [capability.id, capability]));
+      // What this user can do: their granted capabilities plus the profile's general abilities. Ungranted
+      // capabilities are never described as available (they are listed in unavailable instead).
+      const application = { ...baseApplication, capabilities: [...granted.map((capability) => `${capability.title}: ${capability.description}`.slice(0, 120)), ...baseApplication.capabilities].slice(0, 12) };
 
-    const routing = await runTask(ASSISTANT_ROUTE_TASK, {
-      application,
-      question: message,
-      history: modelHistory,
-      capabilities: granted.map(({ id, kind, title, description, examples }) => ({ id, kind, title, description, examples: [...examples] })),
-      unavailable,
-    });
-    const allowedRoutes = new Set([...byId.keys(), "general", "unsupported"]);
-    let route = allowedRoutes.has(routing.route) ? routing.route : "general";
-    const dataNeeded = [...new Set(routing.dataNeeded)].filter((id) => byId.has(id) && byId.get(id).shareFacts).slice(0, 2);
-
-    let status = "ANSWERED";
-    let blocks;
-    let sources = [];
-    let dataBased = false;
-    let appData;
-    const respond = async ({ facts = [], dataResultsShown = false, situation = "answer" }) => {
-      const output = await runTask(ASSISTANT_RESPOND_TASK, {
+      const routing = await runTask(ASSISTANT_ROUTE_TASK, {
         application,
         question: message,
         history: modelHistory,
-        facts,
-        dataResultsShown,
-        freshInformationRequested: routing.freshInformation === true,
-        situation,
-        capabilities: granted.map(({ title, description }) => ({ title, description })),
+        capabilities: granted.map(({ id, kind, title, description, examples }) => ({ id, kind, title, description, examples: [...examples] })),
         unavailable,
       });
-      return output.blocks.map((block) => (block.type === "bullets" ? { type: "bullets", items: block.items } : { type: block.type, text: block.text }));
-    };
+      const allowedRoutes = new Set([...byId.keys(), "general", "unsupported"]);
+      let route = allowedRoutes.has(routing.route) ? routing.route : "general";
+      const dataNeeded = [...new Set(routing.dataNeeded)].filter((id) => byId.has(id) && byId.get(id).shareFacts).slice(0, 2);
 
-    if (byId.has(route)) {
-      const capability = byId.get(route);
-      const result = await runCapability(capability, { message, context, history: modelHistory, memory: capabilityMemory(earlier, capability.id), signal, runTask });
-      if (result.status === "NOT_FOUND" && result.blocks.length === 0) {
-        // The capability had nothing for this message: answer it as a general question instead.
-        route = "general";
-        blocks = await respond({});
+      let status = "ANSWERED";
+      let blocks;
+      let sources = [];
+      let dataBased = false;
+      let appData;
+      const respond = async ({ facts = [], dataResultsShown = false, situation = "answer" }) => {
+        const output = await runTask(ASSISTANT_RESPOND_TASK, {
+          application,
+          question: message,
+          history: modelHistory,
+          facts,
+          dataResultsShown,
+          freshInformationRequested: routing.freshInformation === true,
+          situation,
+          capabilities: granted.map(({ title, description }) => ({ title, description })),
+          unavailable,
+        });
+        return output.blocks.map((block) => (block.type === "bullets" ? { type: "bullets", items: block.items } : { type: block.type, text: block.text }));
+      };
+
+      if (byId.has(route)) {
+        const capability = byId.get(route);
+        const result = await runCapability(capability, { message, context, history: modelHistory, memory: capabilityMemory(earlier, capability.id), signal, runTask });
+        if (result.status === "NOT_FOUND" && result.blocks.length === 0) {
+          // The capability had nothing for this message: answer it as a general question instead.
+          route = "general";
+          blocks = await respond({});
+        } else {
+          status = result.status;
+          blocks = result.blocks;
+          sources = result.sources;
+          dataBased = capability.kind !== "content";
+          if (result.memory !== undefined) appData = { capability: capability.id, memory: result.memory };
+        }
+      } else if (route === "general") {
+        const facts = [];
+        const dataBlocks = [];
+        for (const id of dataNeeded) {
+          const result = await runCapability(byId.get(id), { message, context, history: modelHistory, memory: capabilityMemory(earlier, id), signal, runTask });
+          if (result.facts.length > 0) facts.push({ source: byId.get(id).title, items: result.facts });
+          dataBlocks.push(...result.blocks.filter((block) => block.type !== "paragraph"));
+        }
+        dataBased = facts.length > 0 || dataBlocks.length > 0;
+        blocks = [...(await respond({ facts, dataResultsShown: dataBlocks.length > 0 })), ...dataBlocks];
       } else {
-        status = result.status;
-        blocks = result.blocks;
-        sources = result.sources;
-        dataBased = capability.kind !== "content";
-        if (result.memory !== undefined) appData = { capability: capability.id, memory: result.memory };
+        // Requests to change data: nothing runs; the model writes a helpful redirect.
+        status = "UNSUPPORTED";
+        blocks = await respond({ situation: "change_request" });
       }
-    } else if (route === "general") {
-      const facts = [];
-      const dataBlocks = [];
-      for (const id of dataNeeded) {
-        const result = await runCapability(byId.get(id), { message, context, history: modelHistory, memory: capabilityMemory(earlier, id), signal, runTask });
-        if (result.facts.length > 0) facts.push({ source: byId.get(id).title, items: result.facts });
-        dataBlocks.push(...result.blocks.filter((block) => block.type !== "paragraph"));
-      }
-      dataBased = facts.length > 0 || dataBlocks.length > 0;
-      blocks = [...(await respond({ facts, dataResultsShown: dataBlocks.length > 0 })), ...dataBlocks];
-    } else {
-      // Requests to change data: nothing runs; the model writes a helpful redirect.
-      status = "UNSUPPORTED";
-      blocks = await respond({ situation: "change_request" });
-    }
-    if (sources.length > 0 && !blocks.some((block) => block.type === "sources")) blocks.push({ type: "sources", items: sources.slice(0, 8) });
-    blocks = responseBlocksSchema.parse(blocks.slice(0, 30));
+      if (sources.length > 0 && !blocks.some((block) => block.type === "sources")) blocks.push({ type: "sources", items: sources.slice(0, 8) });
+      blocks = responseBlocksSchema.parse(blocks.slice(0, 30));
 
-    if (history) {
-      await history.append({ context, conversationId, role: "user", text: message, modelVisible: true });
-      await history.append({ context, conversationId, role: "assistant", text: blocksToText(blocks), blocks, route, status, modelVisible: !dataBased, ...(appData ? { appData } : {}) });
+      if (history) {
+        await history.append({ context, conversationId, role: "user", text: message, modelVisible: true });
+        await history.append({ context, conversationId, role: "assistant", text: blocksToText(blocks), blocks, route, status, modelVisible: !dataBased, ...(appData ? { appData } : {}) });
+      }
+      log("info", "Assistant replied", { route, status, dataBased, capabilities: granted.length, latencyMs: Date.now() - started });
+      return Object.freeze({ conversationId, status, route: byId.has(route) ? "capability" : route, blocks, usage, containsInstructionsToAI });
+    } finally {
+      deadline.dispose();
     }
-    log("info", "Assistant replied", { route, status, dataBased, capabilities: granted.length, latencyMs: Date.now() - started });
-    return Object.freeze({ conversationId, status, route: byId.has(route) ? "capability" : route, blocks, usage, containsInstructionsToAI });
   }
 
   const requireHistory = () => {

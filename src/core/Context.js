@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { AiServiceError, ErrorCodes, summarizeZodError } from "./Errors.js";
-import { MAX_GRANTS } from "../constants/Constants.js";
-import { ACTOR_TYPE, ACTOR_TYPES, DATA_CLASSIFICATION, DATA_CLASSIFICATIONS } from "../constants/Enums.js";
-export { AI_ASSISTANT_PERMISSION, MAX_GRANTS } from "../constants/Constants.js";
-export { DATA_CLASSIFICATIONS } from "../constants/Enums.js";
+import { MAX_GRANTS } from "../constants/AssistantConstants.js";
+import { DATA_CLASSIFICATION } from "../enums/DataClassification.js";
+export { AI_ASSISTANT_PERMISSION, MAX_GRANTS } from "../constants/AssistantConstants.js";
+
+const DATA_CLASSIFICATIONS = Object.freeze(Object.values(DATA_CLASSIFICATION));
 
 /** Dotted lowercase identifiers such as "ticket.summary". */
 export const taskIdSchema = z
@@ -20,11 +21,8 @@ export function classificationRank(classification) {
 
 /**
  * Roles and permissions are global across B2Y applications: a role grants named permissions, optionally
- * grouped by module ("Order Management" / "Generate Order Report"), or codes ("VIEW_USERS"); a plan
- * enables features ("ACCESS_ORDER"). Applications pass their role's permissions and plan features as they
- * are, and capabilities require them by the same names. Every name is normalized the same way here
- * ("Order Management:Generate Order Report" -> "order_management:generate_order_report"), so spelling,
- * case and separators never decide access.
+ * grouped by module ("Order Management" / "Generate Order Report"), or codes ("VIEW_USERS"); a plan enables
+ * features ("ACCESS_ORDER").
  */
 export const grantNameSchema = z.string().regex(/^[a-z0-9_]{1,80}(:[a-z0-9_]{1,80})?$/);
 
@@ -77,29 +75,11 @@ const referenceSchema = z
   .max(128)
   .regex(/^[A-Za-z0-9][A-Za-z0-9._:@-]*$/);
 
-/**
- * Identity and authorization facts about one AI request: the application context contract.
- *
- * The application backend builds this from its own authenticated session and
- * authorization checks. This package only validates the shape: it never
- * authenticates anyone, never grants permissions, and never reads identity
- * from prompts, task input or model output.
- *
- *   applicationId       which application the request belongs to (isolates profiles and documents)
- *   tenantId            the consumer's tenant (passed to tools and document sources for scoping)
- *   actor               the authenticated user, or SYSTEM for background work
- *   requestId           correlation id for logs and usage records
- *   permittedTasks      AI tasks this request may run (decided by the consumer)
- *   dataClassification  the most sensitive data the request may send to the model
- *   permissions         optional: permission names the consumer granted for this request
- *   features            optional: subscription or plan features enabled for the tenant
- *   metadata            optional: locale and channel
- */
+/** Identity and authorization facts about one AI request: the application context contract. */
 export const trustedContextSchema = z.strictObject({
   applicationId: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
   tenantId: referenceSchema,
   actor: z.strictObject({
-    type: z.enum(ACTOR_TYPES),
     userId: referenceSchema,
   }),
   requestId: referenceSchema,
@@ -121,11 +101,7 @@ export const trustedContextSchema = z.strictObject({
     .optional(),
 });
 
-/**
- * Validates the context and returns a deep-frozen copy. Freezing keeps the
- * validated tenant and actor identity fixed for the whole task, including
- * when the context is passed to application hooks and used for usage records.
- */
+/** Validates the context and returns a deep-frozen copy. */
 export function parseTrustedContext(value) {
   // Role permissions and plan features arrive as the application stores them; normalize before checking.
   const normalized =
@@ -252,7 +228,7 @@ export function buildTrustedContext({ applicationId, requestTenantId, sessionTen
   return parseTrustedContext({
     applicationId,
     tenantId,
-    actor: { type: ACTOR_TYPE.USER, userId: String(userId) },
+    actor: { userId: String(userId) },
     requestId,
     permittedTasks: (tasks ?? []).map((task) => (typeof task === "string" ? task : task.id)),
     dataClassification,

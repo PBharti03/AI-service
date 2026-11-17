@@ -7,9 +7,8 @@ import { defineConversationStore } from "./ConversationHistory.js";
 
 /**
  * A simple local conversation store: one private file per conversation under
- *   <root>/<hash(applicationId)>/<hash(tenantId)>/<hash(userId)>/<conversationId>.json
- * (folders 0700, files 0600, atomic writes). Ids are hashed into folder names, so no id can point outside
- * its folder. For one server instance; several instances need a shared store (a database) instead.
+ * <root>/<hash(applicationId)>/<hash(tenantId)>/<hash(userId)>/<conversationId>.json (folders 0700, files
+ * 0600, atomic writes).
  */
 
 const CONVERSATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -30,6 +29,15 @@ export function createFolderConversationStore({ root }) {
       if (error?.code === "ENOENT") return null;
       throw error;
     }
+  };
+  // One writer per file at a time, so concurrent replies to one conversation never overwrite each other.
+  const locks = new Map();
+  const exclusive = (file, task) => {
+    const run = (locks.get(file) ?? Promise.resolve()).then(task, task);
+    const tail = run.catch(() => {});
+    locks.set(file, tail);
+    tail.then(() => locks.get(file) === tail && locks.delete(file));
+    return run;
   };
   const write = async (file, value) => {
     const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
@@ -57,10 +65,12 @@ export function createFolderConversationStore({ root }) {
       const scope = { applicationId: message.applicationId, tenantId: message.tenantId, userId: message.userId };
       await fs.mkdir(folderOf(scope), { recursive: true, mode: 0o700 });
       const file = fileOf(scope, message.conversationId);
-      const current = (await read(file)) ?? { conversationId: message.conversationId, messages: [] };
-      current.messages.push(message);
-      current.updatedAt = message.createdAt;
-      await write(file, current);
+      await exclusive(file, async () => {
+        const current = (await read(file)) ?? { conversationId: message.conversationId, messages: [] };
+        current.messages.push(message);
+        current.updatedAt = message.createdAt;
+        await write(file, current);
+      });
     },
     async listMessages({ scope, conversationId, limit }) {
       const current = await read(fileOf(scope, conversationId));
@@ -81,22 +91,27 @@ export function createFolderConversationStore({ root }) {
       return rows.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1)).slice(0, limit);
     },
     async deleteConversation({ scope, conversationId }) {
-      try {
-        await fs.unlink(fileOf(scope, conversationId));
-        return true;
-      } catch (error) {
-        if (error?.code === "ENOENT") return false;
-        throw error;
-      }
+      const file = fileOf(scope, conversationId);
+      return exclusive(file, async () => {
+        try {
+          await fs.unlink(file);
+          return true;
+        } catch (error) {
+          if (error?.code === "ENOENT") return false;
+          throw error;
+        }
+      });
     },
     async deleteInactiveSince({ cutoff }) {
       let deleted = 0;
       for await (const file of walk(base)) {
-        const current = await read(file);
-        if (!current || typeof current.updatedAt !== "string" || current.updatedAt < cutoff) {
+        const removed = await exclusive(file, async () => {
+          const current = await read(file);
+          if (current && typeof current.updatedAt === "string" && current.updatedAt >= cutoff) return false;
           await fs.unlink(file).catch(() => {});
-          deleted += 1;
-        }
+          return true;
+        });
+        if (removed) deleted += 1;
       }
       return deleted;
     },
